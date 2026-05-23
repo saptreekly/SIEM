@@ -1,0 +1,55 @@
+use tokio::net::TcpListener;
+use tokio::io::{BufReader, AsyncBufReadExt};
+use tokio::signal;
+use siem::parse_log;
+use tracing::{info, warn, error};
+use std::sync::Arc;
+
+mod storage;
+use storage::Storage;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
+
+    let storage = Arc::new(Storage::new());
+    
+    // Spawn Janitor
+    let janitor_storage = Arc::clone(&storage);
+    tokio::spawn(storage::run_janitor(janitor_storage));
+
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    info!("SIEM listening on port 8080");
+
+    loop {
+        tokio::select! {
+            res = listener.accept() => {
+                let (socket, addr) = res?;
+                info!("Accepted connection from: {}", addr);
+                
+                let storage_conn = Arc::clone(&storage);
+                tokio::spawn(async move {
+                    let reader = BufReader::new(socket);
+                    let mut lines = reader.lines();
+                    
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        if let Some(event) = parse_log(&line) {
+                            if let Err(e) = storage_conn.send_log(event).await {
+                                error!("Failed to send log to queue: {}", e);
+                            }
+                        } else {
+                            warn!("Failed to parse log line: {}", line);
+                        }
+                    }
+                    info!("Connection closed: {}", addr);
+                });
+            }
+            _ = signal::ctrl_c() => {
+                info!("Shutdown signal received, shutting down...");
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
