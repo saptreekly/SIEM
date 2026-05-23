@@ -1,16 +1,15 @@
 const std = @import("std");
-const net = std.net;
 
 pub fn main() !void {
     var buffer: [65536]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
-    const udp_address = try net.Address.parseIp("0.0.0.0", 514);
-    var udp_socket = try net.udpServer(udp_address);
+    const udp_address = try std.net.Address.parseIp("0.0.0.0", 514);
+    var udp_socket = try std.net.udpServer(udp_address);
     defer udp_socket.close();
 
-    const tcp_address = try net.Address.parseIp("127.0.0.1", 8080);
+    const tcp_address = try std.net.Address.parseIp("127.0.0.1", 8080);
 
     var udp_buf: [65536]u8 = undefined;
     

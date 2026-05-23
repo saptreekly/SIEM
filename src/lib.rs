@@ -1,43 +1,32 @@
 pub mod crypto;
 pub use crypto::fnv1a_hash;
 
-use nom::{
-    bytes::complete::take_until,
-    character::complete::char,
-    IResult,
-};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use compact_str::CompactString;
+
+extern "C" {
+    fn parse_timestamp_asm(data: *const u8) -> i64;
+}
 
 // Define a structured representation of the log
 #[derive(Debug, PartialEq, Clone)]
 pub struct LogEvent {
-    pub timestamp: DateTime<Utc>,
-    pub severity: String,
-    pub source_ip: String,
-    pub facility: String,
+    pub timestamp: i64,
+    pub severity: CompactString,
+    pub source_ip: CompactString,
+    pub facility: CompactString,
     pub message: String,
 }
 
-// Zero-copy parser using nom
+// Zero-copy parser
 pub fn parse_log(raw: &str) -> Option<LogEvent> {
-    match parse_log_nom(raw) {
-        Ok((_, event)) => Some(event),
-        Err(_) => None,
-    }
-}
-
-fn parse_log_nom(input: &str) -> IResult<&str, LogEvent> {
-    // Example: <34>1 2026-05-23T16:00:00Z localhost sshd[1234]: Failed password for root
-    // Placeholder parser to keep it simple while focus is on storage
-    let (input, _) = take_until(":")(input)?;
-    let (input, _) = char(':')(input)?;
-    let (input, _) = char(' ')(input)?;
+    let ts = unsafe { parse_timestamp_asm(raw.as_ptr()) };
     
-    Ok((input, LogEvent { 
-        timestamp: Utc::now(),
-        severity: "INFO".to_string(),
-        source_ip: "127.0.0.1".to_string(),
-        facility: "syslog".to_string(),
-        message: input.to_string() 
-    }))
+    Some(LogEvent { 
+        timestamp: if ts == 0 { Utc::now().timestamp() } else { ts },
+        severity: CompactString::new("INFO"),
+        source_ip: CompactString::new("127.0.0.1"),
+        facility: CompactString::new("syslog"),
+        message: raw.to_string() 
+    })
 }

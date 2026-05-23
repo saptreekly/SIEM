@@ -6,7 +6,7 @@ use tracing::{info, warn, error};
 use std::sync::Arc;
 
 mod storage;
-use storage::Storage;
+use storage::{Storage, StorageMessage};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,8 +15,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = Arc::new(Storage::new());
     
     // Spawn Janitor
-    let janitor_storage = Arc::clone(&storage);
-    tokio::spawn(storage::run_janitor(janitor_storage));
+    let janitor_tx = storage.tx.clone();
+    tokio::spawn(storage::run_janitor(janitor_tx));
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     info!("SIEM listening on port 8080");
@@ -27,11 +27,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (socket, addr) = res?;
                 info!("Accepted connection from: {}", addr);
                 
-                let storage_conn = Arc::clone(&storage);
+                let storage_tx = storage.tx.clone();
                 tokio::spawn(async move {
                     let reader = BufReader::new(socket);
                     let mut lines = reader.lines();
-                    let mut dedup_cache = [0u32; 1000];
+                    let mut dedup_cache = [u32::MAX; 1000];
                     let mut cache_idx = 0;
                     
                     while let Ok(Some(line)) = lines.next_line().await {
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         cache_idx = (cache_idx + 1) % 1000;
                         
                         if let Some(event) = parse_log(&line) {
-                            if let Err(e) = storage_conn.send_log(event).await {
+                            if let Err(e) = storage_tx.send(StorageMessage::Insert(event)).await {
                                 error!("Failed to send log to queue: {}", e);
                             }
                         } else {

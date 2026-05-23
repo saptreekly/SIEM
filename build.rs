@@ -7,9 +7,11 @@ fn main() {
     if target.contains("x86_64") {
         println!("cargo:warning=Compiling x86_64 assembly");
         build.file("src/asm/fnv1a_x86_64.s");
+        build.file("src/asm/parse_timestamp_x86_64.s");
     } else if target.contains("aarch64") {
         println!("cargo:warning=Compiling aarch64 assembly");
         build.file("src/asm/fnv1a_aarch64.s");
+        build.file("src/asm/parse_timestamp_aarch64.s");
     } else {
         panic!("Unsupported architecture");
     }
