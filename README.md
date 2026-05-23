@@ -20,18 +20,20 @@ I needed a system that is:
 
 ## Architecture Highlights
 
-*   **Ingestion Pipeline:** Asynchronous TCP ingestion decoupled by an MPSC channel, featuring a **direct-mapped O(1) deduplication cache** using bitwise masking.
+This is a polyglot, ensemble-based architecture designed for extreme performance and fault-tolerance:
+
+*   **Ingestion Pipeline (Rust):** Asynchronous TCP ingestion decoupled by an MPSC channel, featuring a **direct-mapped O(1) deduplication cache** using bitwise masking.
+*   **Control Plane (Elixir):** A robust **GenServer-based supervisor** that monitors the Rust core, providing fault-tolerance, automated restarts, and dynamic control interfaces via Unix Domain Sockets (UDS).
+*   **Global Ensemble Mesh:** All SIEM nodes form a **Gossip Mesh** using hash-based synchronization, ensuring deduplication events are propagated across the cluster globally.
 *   **Optimized Parser:** Zero-heap parsing utilizing `nom` and `CompactString` for stack-allocated storage.
 *   **Assembly Acceleration:** FNV-1a deduplication and ISO-8601 parsing implemented in standalone **x86_64/AArch64 assembly** for SIMD-ready performance.
-*   **Actor-Based Storage:** Dedicated `database_actor` serializing database operations to eliminate lock contention.
-*   **Threat Correlation Engine:** High-performance analytics module implemented in **Odin** using `#soa` layouts for vectorized, cache-line optimized security correlation.
-*   **Control Plane (Elixir):** A robust **GenServer-based supervisor** that monitors the Rust core, providing fault-tolerance, automated restarts, and dynamic control interfaces via Unix Domain Sockets.
+*   **Actor-Based Storage:** Dedicated `database_actor` running in a synchronous OS thread to eliminate lock contention on the SQLite backend.
+*   **Threat Correlation Engine (Odin):** High-performance analytics module implemented in **Odin** using `#soa` layouts for vectorized, cache-line optimized security correlation.
 *   **Automated Storage Tiering:** 
-    *   **Hot Tier:** WAL-indexed SQLite (SSD/High-IOPS).
+    *   **Hot Tier:** WAL-indexed SQLite.
     *   **Warm Tier:** Optimized SQLite for historical query.
     *   **Cold Tier:** Automated export to compressed storage.
-*   **Janitor:** Background maintenance tasks that handle data migration without blocking ingestion.
-*   **Edge Agent:** High-performance, zero-allocation UDP-to-TCP forwarder implemented in **Zig**.
+*   **Edge Agent (Zig):** High-performance, zero-allocation UDP-to-TCP forwarder implemented in **Zig**.
 
 ## License
 
