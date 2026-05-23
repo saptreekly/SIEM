@@ -46,11 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mesh_clone = Arc::clone(&gossip_mesh);
     tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
 
-    // Initialize SHM and pass to Storage
-    info!("Initializing SHM...");
-    let shm = ShmRingBuffer::new();
-    let storage = Arc::new(Storage::new(Some(shm)));
-
     let enabled = Arc::clone(&is_ingestion_enabled);
     thread::spawn(move || {
         loop {

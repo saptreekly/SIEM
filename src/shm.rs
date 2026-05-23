@@ -4,6 +4,8 @@ use siem::LogEvent;
 
 pub const SHM_PATH: &str = "/tmp/siem_shm.bin";
 pub const SHM_SIZE: usize = 1024 * 1024; // 1MB
+pub const HEADER_SIZE: usize = 8; // 4 byte head, 4 byte tail
+pub const DATA_SIZE: usize = SHM_SIZE - HEADER_SIZE;
 
 pub struct ShmRingBuffer {
     mmap: MmapMut,
@@ -26,18 +28,27 @@ impl ShmRingBuffer {
     }
 
     pub fn write_event(&mut self, event: &LogEvent) {
-        // Simple ring buffer: [head:8][tail:8][data...]
-        // In a real implementation, use atomic head/tail.
-        // For this prototype, we'll write at a fixed offset after header.
-        let data = bincode::serialize(event).expect("Failed to serialize");
+        let data = format!("{:?}", event).into_bytes();
         let len = data.len();
-        if len + 16 > SHM_SIZE { return; } // Too large
+        if len + 4 > DATA_SIZE { return; } // Simplified: check if fits at all
 
         unsafe {
             let ptr = self.mmap.as_mut_ptr();
-            // Write length then data
-            std::ptr::copy_nonoverlapping(len.to_le_bytes().as_ptr(), ptr.add(16), 8);
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.add(24), len);
+            
+            // Read current head
+            let head_ptr = ptr as *mut u32;
+            let head = std::ptr::read_volatile(head_ptr);
+            
+            // Write data with wrapping
+            let write_pos = head as usize;
+            for i in 0..len {
+                let pos = (write_pos + i) % DATA_SIZE;
+                std::ptr::write_volatile(ptr.add(HEADER_SIZE + pos), data[i]);
+            }
+            
+            // Update head
+            let new_head = (head + len as u32) % DATA_SIZE as u32;
+            std::ptr::write_volatile(head_ptr, new_head);
         }
     }
 }
