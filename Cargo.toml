@@ -23,3 +23,6 @@ harness = false
 
 [build-dependencies]
 cc = "1.0"
+
+[profile.release]
+debug = true
