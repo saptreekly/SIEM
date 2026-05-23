@@ -16,6 +16,7 @@ compact_str = "0.8"
 crossbeam-channel = "0.5"
 bloomfilter = "1.0"
 opentelemetry = "0.24"
+dotenvy = "0.15"
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 tracing-opentelemetry = "0.25"
 opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic"] }

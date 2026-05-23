@@ -2,9 +2,7 @@ use tokio::net::TcpListener;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use tokio::signal;
 use siem::{parse_log, crypto::fnv1a_hash};
-use opentelemetry::trace::TracerProvider;
 use tracing::{info, warn, error, info_span};
-use tracing_subscriber::{layer::SubscriberExt, Registry};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::thread;
@@ -15,27 +13,16 @@ mod gossip;
 use storage::{Storage, StorageMessage};
 use gossip::GossipMesh;
 
-// OTEL setup
-fn init_tracer() {
-    let tracer = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-        .install_batch(opentelemetry_sdk::runtime::Tokio)
-        .expect("Failed to initialize tracer");
-    
-    let tracer = tracer.tracer("siem-tracer");
-
-    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-    let subscriber = Registry::default().with(telemetry).with(tracing_subscriber::fmt::layer());
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    init_tracer();
+    dotenvy::dotenv().ok();
+    tracing_subscriber::fmt::init();
+    
+    let tcp_port = std::env::var("SIEM_TCP_PORT").unwrap_or_else(|_| "8080".to_string());
+    
     let storage = Arc::new(Storage::new());
     let threshold = Arc::new(AtomicU64::new(100)); // Default threshold
-
+    
     // Spawn Janitor
     let janitor_tx = storage.tx.clone();
     thread::spawn(move || storage::run_janitor(janitor_tx));
@@ -48,12 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(control::start_control_listener(sp_clone, control_threshold));
 
     // Spawn Gossip Mesh
-    let gossip_mesh = Arc::new(GossipMesh::new(10000, 10));
-    let mesh_clone = Arc::clone(&gossip_mesh);
-    tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
+    tokio::spawn(gossip::start_gossip(node_name, 9000, Arc::new(GossipMesh::new(10000, 10))));
 
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    info!("SIEM listening on port 8080");
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", tcp_port)).await?;
+    info!("SIEM listening on port {}", tcp_port);
 
     loop {
         tokio::select! {
