@@ -1,51 +1,60 @@
 const std = @import("std");
 
+const SHM_SIZE: usize = 1024 * 1024; // 1MB for example
+
+const HEAD_OFFSET: usize = 0;
+const TAIL_OFFSET: usize = 4;
+const DATA_OFFSET: usize = 8;
+const DATA_SIZE: usize = SHM_SIZE - DATA_OFFSET;
+
 pub fn main() !void {
-    var buffer: [65536]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = fba.allocator();
+    const file = try std.fs.openFileAbsolute("/tmp/siem_shm.bin", .{ .mode = .read_write });
+    defer file.close();
 
-    const udp_address = try std.net.Address.parseIp("0.0.0.0", 514);
-    var udp_socket = try std.net.udpServer(udp_address);
-    defer udp_socket.close();
+    const mmap = try std.posix.mmap(null, SHM_SIZE, std.posix.PROT.WRITE, std.posix.MAP.SHARED, file.handle, 0);
+    defer std.posix.munmap(mmap);
 
-    const tcp_address = try std.net.Address.parseIp("127.0.0.1", 8080);
+    var data_buffer = mmap[DATA_OFFSET..];
 
-    var udp_buf: [65536]u8 = undefined;
+    // Initialize head and tail if shared memory is new/empty
+    @memcpy(mmap[HEAD_OFFSET..HEAD_OFFSET+4], &@as(u32, 0));
+    @memcpy(mmap[TAIL_OFFSET..TAIL_OFFSET+4], &@as(u32, 0));
+
+    var head: u32 = 0;
+    var tail: u32 = 0;
     
-    std.debug.print("Forwarder listening on UDP 514, forwarding to TCP 8080\n", .{});
+    const mock_log = "<34>1 2026-05-23T16:00:00Z test_service: This is a test log\n";
+    const log_len: u32 = @intCast(mock_log.len);
 
     while (true) {
-        var stream = std.net.tcpConnectToAddress(tcp_address) catch |err| {
-            std.debug.print("Failed to connect to SIEM ({}). Retrying in 2 seconds...\n", .{err});
-            std.time.sleep(2 * std.time.ns_per_s);
-            continue;
-        };
-        defer stream.close();
-        std.debug.print("Connected to SIEM\n", .{});
+        // Read tail from shared memory
+        tail = @bitCast(*u32, &mmap[TAIL_OFFSET]).*;
 
-        while (true) {
-            // Reset allocator for each packet to keep it zero-allocation on heap
-            fba.reset();
-
-            const result = udp_socket.receiveFrom(&udp_buf) catch |err| {
-                std.debug.print("UDP receive error: {}\n", .{err});
-                break;
-            };
-
-            const packet = udp_buf[0..result.numberOfBytes];
-            
-            // Format with newline using fixed allocator
-            const framed = std.fmt.allocPrint(allocator, "{s}\n", .{packet}) catch |err| {
-                std.debug.print("Buffer error: {}\n", .{err});
-                continue;
-            };
-
-            stream.writer().writeAll(framed) catch |err| {
-                std.debug.print("TCP write error: {}\n", .{err});
-                break;
-            };
+        // Calculate available space
+        var available_space: u32 = 0;
+        if (head >= tail) {
+            available_space = DATA_SIZE - (head - tail);
+        } else {
+            available_space = tail - head;
         }
-        std.debug.print("Connection lost. Reconnecting...\n", .{});
+
+        if (available_space > log_len + 1) { // +1 for a null terminator or separator
+            if (head + log_len > DATA_SIZE) { // Wrap around
+                // Write part to end, then wrap and write rest from beginning
+                var first_part_len = DATA_SIZE - head;
+                @memcpy(data_buffer[head .. head + first_part_len], mock_log[0 .. first_part_len]);
+                head = 0;
+                @memcpy(data_buffer[head .. head + (log_len - first_part_len)], mock_log[first_part_len ..]);
+                head += (log_len - first_part_len);
+            } else {
+                @memcpy(data_buffer[head .. head + log_len], mock_log);
+                head += log_len;
+            }
+            // Write new head to shared memory
+            @memcpy(mmap[HEAD_OFFSET..HEAD_OFFSET+4], &head);
+        } else {
+            // Buffer full, wait a bit
+            std.time.sleep(10 * std.time.ns_per_ms);
+        }
     }
 }

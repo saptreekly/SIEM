@@ -23,7 +23,7 @@ defmodule SiemSupervisor.GossipListener do
   @impl true
   def handle_info(:prune_nodes, state) do
     now = System.system_time(:second)
-    :ets.match_each(@table, {:"$1", :"$2"})
+    :ets.tab2list(@table)
     |> Enum.each(fn {node_id, last_seen} ->
       if now - last_seen > div(@node_timeout, 1000) do
         :ets.delete(@table, node_id)

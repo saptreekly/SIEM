@@ -3,13 +3,14 @@ pub use crypto::fnv1a_hash;
 
 use chrono::Utc;
 use compact_str::CompactString;
+use serde::{Serialize, Deserialize};
 
 extern "C" {
     fn parse_timestamp_asm(data: *const u8) -> i64;
 }
 
 // Define a structured representation of the log
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct LogEvent {
     pub timestamp: i64,
     pub severity: CompactString,

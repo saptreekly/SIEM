@@ -9,7 +9,7 @@ defmodule SiemSupervisor.RustProcess do
   @impl true
   def init(:ok) do
     # Start the Rust SIEM process
-    port = Port.open({:spawn, "./target/release/siem"}, [:binary, :exit_status])
+    port = Port.open({:spawn, "/Users/jackweekly/Desktop/SIEM/target/debug/siem"}, [:binary, :exit_status])
     {:ok, %{port: port}}
   end
 
@@ -23,13 +23,12 @@ defmodule SiemSupervisor.RustProcess do
   def handle_info({_port, {:exit_status, status}}, state) do
     Logger.error("Rust SIEM crashed with status #{status}. Restarting...")
     # Restart the process
-    port = Port.open({:spawn, "./target/release/siem"}, [:binary, :exit_status])
+    port = Port.open({:spawn, "/Users/jackweekly/Desktop/SIEM/target/debug/siem"}, [:binary, :exit_status])
     {:noreply, %{state | port: port}}
   end
 end
 
 defmodule SiemSupervisor.ControlClient do
-  @table :siem_nodes
 
   def send_command(node_id, command) do
     # Assuming each node has a dedicated socket path based on ID
@@ -53,6 +52,4 @@ defmodule SiemSupervisor.ControlClient do
       update_threshold(node_id, new_threshold)
     end
   end
-end
-
 end

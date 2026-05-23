@@ -11,15 +11,15 @@ use std::time::Duration;
 mod storage;
 mod control;
 mod gossip;
+mod shm;
 use storage::{Storage, StorageMessage};
 use gossip::GossipMesh;
+use shm::ShmRingBuffer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
-    
-    let tcp_port = std::env::var("SIEM_TCP_PORT").unwrap_or_else(|_| "8080".to_string());
     
     let storage = Arc::new(Storage::new());
     let threshold = Arc::new(AtomicU64::new(100)); // Default threshold
@@ -42,8 +42,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mesh_clone = Arc::clone(&gossip_mesh);
     tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
 
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", tcp_port)).await?;
-    info!("SIEM listening on port {}", tcp_port);
+    // Spawn SHM Reader Task
+    info!("Starting SHM Reader...");
+    let _shm = ShmRingBuffer::new();
+    let enabled = Arc::clone(&is_ingestion_enabled);
+    thread::spawn(move || {
+        loop {
+            if !enabled.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    info!("SIEM listening on port 8080");
 
     loop {
         tokio::select! {
