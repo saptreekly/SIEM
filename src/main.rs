@@ -2,7 +2,9 @@ use tokio::net::TcpListener;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use tokio::signal;
 use siem::{parse_log, crypto::fnv1a_hash};
-use tracing::{info, warn, error};
+use opentelemetry::trace::TracerProvider;
+use tracing::{info, warn, error, info_span};
+use tracing_subscriber::{layer::SubscriberExt, Registry};
 use std::sync::Arc;
 use std::thread;
 
@@ -10,12 +12,26 @@ mod storage;
 mod control;
 use storage::{Storage, StorageMessage};
 
+// OTEL setup
+fn init_tracer() {
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
+        .expect("Failed to initialize tracer");
+    
+    let tracer = tracer.tracer("siem-tracer");
+
+    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+    let subscriber = Registry::default().with(telemetry).with(tracing_subscriber::fmt::layer());
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
-
+    init_tracer();
     let storage = Arc::new(Storage::new());
-
+    
     // Spawn Janitor
     let janitor_tx = storage.tx.clone();
     thread::spawn(move || storage::run_janitor(janitor_tx));
@@ -39,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut dedup_cache = [u32::MAX; 2048];
                     
                     while let Ok(Some(line)) = lines.next_line().await {
+                        let _span = info_span!("ingest_log", addr = %addr).entered();
                         let hash = fnv1a_hash(line.as_bytes());
                         let slot_idx = (hash as usize) & 2047;
                         
