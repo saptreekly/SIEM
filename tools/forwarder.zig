@@ -7,11 +7,12 @@ const TAIL_OFFSET: usize = 4;
 const DATA_OFFSET: usize = 8;
 const DATA_SIZE: usize = SHM_SIZE - DATA_OFFSET;
 
-// C FFI for macOS
+// Stable POSIX C FFI to shield the application from Zig standard library namespace changes
 extern "c" fn open(path: [*:0]const u8, flags: c_int, mode: c_uint) c_int;
 extern "c" fn mmap(addr: ?*anyopaque, len: usize, prot: c_int, flags: c_int, fd: c_int, offset: i64) ?*anyopaque;
 extern "c" fn munmap(addr: *anyopaque, len: usize) c_int;
 extern "c" fn close(fd: c_int) c_int;
+extern "c" fn usleep(useconds: c_uint) c_int;
 
 const O_RDWR = 0x0002;
 const O_CREAT = 0x0200;
@@ -30,19 +31,17 @@ pub fn main() !void {
     const mmap_slice: [*]u8 = @ptrCast(mmap_ptr);
     var data_buffer = mmap_slice[DATA_OFFSET..SHM_SIZE];
 
-    // Initialize head and tail
+    // Initialize volatile head and tail pointers
     @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = 0;
     @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).* = 0;
 
     var head: u32 = 0;
     var tail: u32 = 0;
-
     const mock_log = "<34>1 2026-05-23T16:00:00Z test_service: This is a test log\n";
     const log_len: u32 = @intCast(mock_log.len);
 
     while (true) {
         tail = @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).*;
-
         var available_space: u32 = 0;
         if (head >= tail) {
             available_space = @as(u32, @intCast(DATA_SIZE)) - (head - tail);
@@ -63,7 +62,7 @@ pub fn main() !void {
             }
             @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = head;
         } else {
-            std.time.sleep(10 * std.time.ns_per_ms);
+            _ = usleep(10000); // 10ms yield via low-overhead POSIX C FFI
         }
     }
 }
