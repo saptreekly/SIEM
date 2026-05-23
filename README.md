@@ -17,6 +17,16 @@ I needed a system that is:
 *   **Fast:** O(1) deduplication and high-throughput ingestion.
 *   **Fault-Tolerant:** Embraces the "Let it Fail" philosophy via supervised process management.
 *   **Self-Contained:** No massive distributed cluster required for basic operations.
+
+## The Ensemble Orchestra
+
+This SIEM utilizes a "Conductor/Performer" architecture to separate high-velocity data processing from control-plane orchestration:
+
+*   **The Performers (Rust, Zig, Odin, ASM):** These are the high-velocity "musicians." They operate asynchronously and independently, handling log ingestion, assembly-accelerated parsing, and in-memory threat correlation. They synchronize state (deduplication filters) via a P2P Gossip Mesh to avoid centralized bottlenecks.
+*   **The Conductor (Elixir/BEAM):** This is the "scorekeeper." It monitors the health of all Performer nodes, handles process supervision (automatically restarting failed performers), propagates global configuration changes (rules/thresholds), and aggregates cluster-wide telemetry.
+
+This hybrid approach leverages Erlang/BEAM’s world-class fault tolerance to manage the lifecycle of high-performance native-compiled data plane components.
+
 ## Architecture Highlights
 
 This is a polyglot, ensemble-based architecture designed for extreme performance and fault-tolerance:
