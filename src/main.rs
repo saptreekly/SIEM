@@ -6,10 +6,12 @@ use opentelemetry::trace::TracerProvider;
 use tracing::{info, warn, error, info_span};
 use tracing_subscriber::{layer::SubscriberExt, Registry};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::thread;
 
 mod storage;
 mod control;
+mod gossip;
 use storage::{Storage, StorageMessage};
 
 // OTEL setup
@@ -31,13 +33,21 @@ fn init_tracer() {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracer();
     let storage = Arc::new(Storage::new());
-    
+    let threshold = Arc::new(AtomicU64::new(100)); // Default threshold
+
     // Spawn Janitor
     let janitor_tx = storage.tx.clone();
     thread::spawn(move || storage::run_janitor(janitor_tx));
 
     // Spawn Control Plane
-    tokio::spawn(control::start_control_listener("/tmp/siem_control.sock"));
+    let node_name = format!("performer-{}", std::process::id());
+    let socket_path = format!("/tmp/siem_control_{}.sock", node_name);
+    let control_threshold = Arc::clone(&threshold);
+    let sp_clone = socket_path.clone();
+    tokio::spawn(control::start_control_listener(sp_clone, control_threshold));
+
+    // Spawn Gossip Mesh
+    tokio::spawn(gossip::start_gossip(node_name, 9000));
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     info!("SIEM listening on port 8080");
@@ -45,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::select! {
             res = listener.accept() => {
-                let (socket, addr) = res?;
+                let (socket, addr) = res.unwrap();
                 info!("Accepted connection from: {}", addr);
                 
                 let storage_tx = storage.tx.clone();
@@ -77,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ = signal::ctrl_c() => {
                 info!("Shutdown signal received, shutting down...");
-                let _ = std::fs::remove_file("/tmp/siem_control.sock");
+                let _ = std::fs::remove_file(socket_path);
                 break;
             }
         }

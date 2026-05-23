@@ -29,15 +29,30 @@ defmodule SiemSupervisor.RustProcess do
 end
 
 defmodule SiemSupervisor.ControlClient do
-  def send_command(command) do
-    # Connect to the UDS created by Rust
-    case :gen_tcp.connect({:local, '/tmp/siem_control.sock'}, 0, [:binary, packet: 0]) do
+  @table :siem_nodes
+
+  def send_command(node_id, command) do
+    # Assuming each node has a dedicated socket path based on ID
+    socket_path = "/tmp/siem_control_#{node_id}.sock"
+    case :gen_tcp.connect({:local, ~c"#{socket_path}"}, 0, [:binary, packet: 0]) do
       {:ok, socket} ->
-        :gen_tcp.send(socket, command <> "
-")
+        :gen_tcp.send(socket, command <> "\n")
         {:ok, socket}
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  def update_threshold(node_id, new_threshold) do
+    send_command(node_id, "SET_THRESHOLD #{new_threshold}")
+  end
+
+  def broadcast_threshold(new_threshold) do
+    nodes = :ets.tab2list(:siem_nodes)
+    for {node_id, _} <- nodes do
+      update_threshold(node_id, new_threshold)
+    end
+  end
+end
+
 end
