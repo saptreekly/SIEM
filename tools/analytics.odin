@@ -3,13 +3,18 @@ package siem_analytics
 import "core:fmt"
 import "core:os"
 import "core:time"
-import "core:sys/posix"
 
 SHM_SIZE    :: 1024 * 1024
 HEAD_OFFSET :: 0
 TAIL_OFFSET :: 4
 DATA_OFFSET :: 8
 DATA_SIZE   :: SHM_SIZE - DATA_OFFSET
+
+// Stable POSIX Syscall Flags
+PROT_READ  :: 0x01
+PROT_WRITE :: 0x02
+MAP_SHARED :: 0x0001
+MAP_FAILED :: rawptr(~uintptr(0))
 
 LogEvent :: struct {
     timestamp: i64,
@@ -19,29 +24,38 @@ LogEvent :: struct {
     message:   [24]u8,
 }
 
+// Bind directly to macOS system libc to bypass Odin standard library discrepancies
+// Using unique names to avoid collisions with core:sys/posix
+foreign import libc "system:c"
+
+foreign libc {
+    @(link_name="mmap")
+    my_mmap   :: proc(addr: rawptr, len: int, prot: i32, flags: i32, fd: i32, offset: i64) -> rawptr ---
+    @(link_name="munmap")
+    my_munmap :: proc(addr: rawptr, len: int) -> i32 ---
+}
+
 main :: proc() {
-    fd, err := os.open("/tmp/siem_shm.bin", os.O_RDWR)
+    // 1. Open file using Odin's wrapper to get a handle
+    file, err := os.open("/tmp/siem_shm.bin", os.O_RDWR)
     if err != os.ERROR_NONE {
         fmt.eprintln("Error opening /tmp/siem_shm.bin:", err)
         return
     }
-    defer os.close(fd)
+    defer os.close(file)
+    
+    // Get raw fd from the handle
+    fd := i32(os.fd(file))
 
-    // Using POSIX constants from core:sys/posix
-    addr, mmap_err := posix.mmap(
-        nil, 
-        SHM_SIZE, 
-        posix.PROT_READ | posix.PROT_WRITE, 
-        posix.MAP_SHARED, 
-        i32(os.get_fd(fd)), 
-        0,
-    )
-    if mmap_err != .NONE {
-        fmt.eprintln("Error mmapping /tmp/siem_shm.bin:", mmap_err)
+    // 2. Map file into process address space
+    addr := my_mmap(nil, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
+    if addr == MAP_FAILED {
+        fmt.eprintln("Error: Native macOS mmap allocation failed.")
         return
     }
-    defer posix.munmap(addr, SHM_SIZE)
+    defer my_munmap(addr, SHM_SIZE)
 
+    // 3. Cast raw pointer allocation to a safe byte index array slice
     data := ([^]u8)(addr)[:SHM_SIZE]
 
     hot_window := make([dynamic]LogEvent)
@@ -61,11 +75,13 @@ main :: proc() {
             continue
         }
 
+        // Overlay our LogEvent structure blueprint exactly where the tail offset indicates
         event_ptr := cast(^LogEvent)&data[DATA_OFFSET + int(tail)]
         append(&hot_window, event_ptr^)
         
         fmt.printf("Processed Event: TS=%d\n", event_ptr.timestamp)
         
+        // Step forward in memory cleanly by the uniform size of our data struct
         tail = (tail + u32(size_of(LogEvent))) % u32(DATA_SIZE)
         tail_ptr^ = tail
     }
