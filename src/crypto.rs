@@ -30,6 +30,6 @@ mod tests {
     fn test_fnv1a_values() {
         // Known FNV-1a 32-bit test vectors
         assert_eq!(fnv1a_hash(b""), 0x811c9dc5);
-        assert_eq!(fnv1a_hash(b"a"), 0x050c5d1f);
+        assert_eq!(fnv1a_hash(b"a"), 0xe40c292c);
     }
 }

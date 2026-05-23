@@ -1,9 +1,11 @@
-.global fnv1a_hash_asm
-fnv1a_hash_asm:
+.global _fnv1a_hash_asm
+_fnv1a_hash_asm:
     # x0 = pointer
     # x1 = length
-    ldr w2, =0x811c9dc5
-    ldr w3, =0x01000193
+    mov w2, #0x9dc5
+    movk w2, #0x811c, lsl #16
+    mov w3, #0x0193
+    movk w3, #0x0100, lsl #16
     cmp x1, #0
     b.eq 2f
 1:

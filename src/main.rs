@@ -1,7 +1,7 @@
 use tokio::net::TcpListener;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use tokio::signal;
-use siem::parse_log;
+use siem::{parse_log, crypto::fnv1a_hash};
 use tracing::{info, warn, error};
 use std::sync::Arc;
 
@@ -31,8 +31,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::spawn(async move {
                     let reader = BufReader::new(socket);
                     let mut lines = reader.lines();
+                    let mut dedup_cache = [0u32; 1000];
+                    let mut cache_idx = 0;
                     
                     while let Ok(Some(line)) = lines.next_line().await {
+                        let hash = fnv1a_hash(line.as_bytes());
+                        if dedup_cache.contains(&hash) {
+                            continue; // Drop duplicate
+                        }
+                        dedup_cache[cache_idx] = hash;
+                        cache_idx = (cache_idx + 1) % 1000;
+                        
                         if let Some(event) = parse_log(&line) {
                             if let Err(e) = storage_conn.send_log(event).await {
                                 error!("Failed to send log to queue: {}", e);
