@@ -31,6 +31,7 @@ test:
 
 stress-test: build
 	@echo "Starting stress test pipeline..."
+	@rm -f /tmp/siem_shm.bin;
 	@./target/release/siem & \
 	SERVER_PID=$$!; \
 	echo $$SERVER_PID > test.pid; \
