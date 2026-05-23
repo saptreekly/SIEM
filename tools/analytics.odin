@@ -63,23 +63,43 @@ main :: proc() {
 
     fmt.println("Odin Analytics Engine: Started reading raw structs from /tmp/siem_shm.bin")
     
-    for {
+    event_count := 0
+    for event_count < 500 {
         head_ptr := cast(^u32)&data[HEAD_OFFSET]
         tail_ptr := cast(^u32)&data[TAIL_OFFSET]
         
         head := head_ptr^
         tail := tail_ptr^
 
+        // Validate head and tail
+        if head >= DATA_SIZE || tail >= DATA_SIZE {
+             fmt.eprintf("WARNING: Invalid head/tail values\n")
+             head_ptr^ = 0
+             tail_ptr^ = 0
+             head = 0
+             tail = 0
+        }
+
         if head == tail {
             time.sleep(10 * time.Millisecond)
             continue
         }
 
+        // DEBUG: Check tail bounds (keep for now to be sure)
+        if DATA_OFFSET + int(tail) + size_of(LogEvent) > SHM_SIZE {
+             fmt.eprintf("CRITICAL: Tail out of bounds! tail: %d\n", tail)
+             // Instead of breaking, let's reset tail to 0 to recover
+             tail_ptr^ = 0
+             continue
+        }
+
         // Overlay our LogEvent structure blueprint exactly where the tail offset indicates
         event_ptr := cast(^LogEvent)&data[DATA_OFFSET + int(tail)]
         append(&hot_window, event_ptr^)
+
+        event_count += 1
         
-        fmt.printf("Processed Event: TS=%d\n", event_ptr.timestamp)
+        fmt.printf("Processed Event %d: TS=%d\n", event_count, event_ptr.timestamp)
         
         // Step forward in memory cleanly by the uniform size of our data struct
         tail = (tail + u32(size_of(LogEvent))) % u32(DATA_SIZE)
