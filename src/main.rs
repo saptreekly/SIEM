@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let storage = Arc::new(Storage::new());
     let threshold = Arc::new(AtomicU64::new(100)); // Default threshold
-    
+
     // Spawn Janitor
     let janitor_tx = storage.tx.clone();
     thread::spawn(move || storage::run_janitor(janitor_tx));
@@ -35,7 +35,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(control::start_control_listener(sp_clone, control_threshold));
 
     // Spawn Gossip Mesh
-    tokio::spawn(gossip::start_gossip(node_name, 9000, Arc::new(GossipMesh::new(10000, 10))));
+    let gossip_mesh = Arc::new(GossipMesh::new(10000));
+    let mesh_clone = Arc::clone(&gossip_mesh);
+    tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", tcp_port)).await?;
     info!("SIEM listening on port {}", tcp_port);
@@ -47,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("Accepted connection from: {}", addr);
                 
                 let storage_tx = storage.tx.clone();
+                let mesh = Arc::clone(&gossip_mesh);
                 tokio::spawn(async move {
                     let reader = BufReader::new(socket);
                     let mut lines = reader.lines();
@@ -57,10 +60,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let hash = fnv1a_hash(line.as_bytes());
                         let slot_idx = (hash as usize) & 2047;
                         
+                        // Check local O(1) cache
                         if dedup_cache[slot_idx] == hash {
                              continue;
                         }
+                        
+                        // Check global Gossip hashes
+                        if mesh.recent_hashes.read().unwrap().contains(&hash) {
+                             continue;
+                        }
+                        
                         dedup_cache[slot_idx] = hash;
+                        mesh.recent_hashes.write().unwrap().push(hash);
+                        if mesh.recent_hashes.read().unwrap().len() > 100 { 
+                            mesh.recent_hashes.write().unwrap().remove(0); 
+                        }
                         
                         if let Some(event) = parse_log(&line) {
                             if let Err(e) = storage_tx.send(StorageMessage::Insert(event)) {
