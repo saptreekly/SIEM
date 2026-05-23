@@ -13,6 +13,7 @@ mod storage;
 mod control;
 mod gossip;
 use storage::{Storage, StorageMessage};
+use gossip::GossipMesh;
 
 // OTEL setup
 fn init_tracer() {
@@ -47,7 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(control::start_control_listener(sp_clone, control_threshold));
 
     // Spawn Gossip Mesh
-    tokio::spawn(gossip::start_gossip(node_name, 9000));
+    let gossip_mesh = Arc::new(GossipMesh::new(10000, 10));
+    let mesh_clone = Arc::clone(&gossip_mesh);
+    tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     info!("SIEM listening on port 8080");
