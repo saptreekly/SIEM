@@ -1,9 +1,10 @@
 use rusqlite::{params, Connection};
 use std::fs;
-use tracing::info;
+use std::thread;
+use tracing::{info};
 use siem::LogEvent;
-use tokio::sync::mpsc;
-use tokio::time::{self, Duration, Instant};
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use std::time::{Duration, Instant};
 
 pub enum StorageMessage {
     Insert(LogEvent),
@@ -11,7 +12,7 @@ pub enum StorageMessage {
 }
 
 pub struct Storage {
-    pub tx: mpsc::Sender<StorageMessage>,
+    pub tx: Sender<StorageMessage>,
 }
 
 impl Storage {
@@ -20,17 +21,17 @@ impl Storage {
         fs::create_dir_all("./storage/warm").unwrap();
         fs::create_dir_all("./storage/cold").unwrap();
 
-        // MPSC channel: Capacity 10000 to buffer bursts
-        let (tx, rx) = mpsc::channel::<StorageMessage>(10000);
+        let (tx, rx) = unbounded::<StorageMessage>();
 
-        // Spawn background database actor
-        tokio::spawn(database_actor(rx));
+        thread::spawn(move || {
+            database_actor_sync(rx);
+        });
 
         Storage { tx }
     }
 }
 
-async fn database_actor(mut rx: mpsc::Receiver<StorageMessage>) {
+fn database_actor_sync(rx: Receiver<StorageMessage>) {
     let mut hot_conn = Connection::open("storage/hot/hot_logs.db").expect("Failed to open hot db");
     hot_conn.busy_timeout(Duration::from_secs(5)).expect("Failed to set busy timeout");
     hot_conn.pragma_update(None, "journal_mode", "WAL").expect("Failed to set WAL mode");
@@ -62,12 +63,12 @@ async fn database_actor(mut rx: mpsc::Receiver<StorageMessage>) {
     ).expect("Failed to initialize warm database schema");
 
     let mut batch = Vec::with_capacity(5000);
-    let mut interval = time::interval(Duration::from_millis(500));
     let mut last_flush = Instant::now();
 
     loop {
-        tokio::select! {
-            Some(msg) = rx.recv() => {
+        // Block until message or timeout
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(msg) => {
                 match msg {
                     StorageMessage::Insert(event) => {
                         batch.push(event);
@@ -77,7 +78,6 @@ async fn database_actor(mut rx: mpsc::Receiver<StorageMessage>) {
                         }
                     }
                     StorageMessage::Maintenance => {
-                        // Janitor migration logic (In-memory buffer to avoid ATTACH lock contention)
                         let threshold = chrono::Utc::now().timestamp() - 3600;
                         
                         let logs: Vec<(i64, String, String, String, String)> = hot_conn.prepare(
@@ -105,12 +105,13 @@ async fn database_actor(mut rx: mpsc::Receiver<StorageMessage>) {
                     }
                 }
             }
-            _ = interval.tick() => {
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 if !batch.is_empty() && last_flush.elapsed() >= Duration::from_millis(500) {
                     flush_batch(&mut hot_conn, &mut batch);
                     last_flush = Instant::now();
                 }
             }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
     }
 }
@@ -136,11 +137,10 @@ fn flush_batch(conn: &mut Connection, batch: &mut Vec<LogEvent>) {
     info!("Flushed batch of logs to Hot storage");
 }
 
-pub async fn run_janitor(tx: mpsc::Sender<StorageMessage>) {
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+pub fn run_janitor(tx: Sender<StorageMessage>) {
     loop {
-        interval.tick().await;
+        thread::sleep(Duration::from_secs(60));
         info!("Sending Maintenance signal...");
-        let _ = tx.send(StorageMessage::Maintenance).await;
+        let _ = tx.send(StorageMessage::Maintenance);
     }
 }
