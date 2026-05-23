@@ -12,6 +12,7 @@ use crate::shm::ShmRingBuffer;
 pub enum StorageMessage {
     Insert(LogEvent),
     Maintenance,
+    Shutdown,
 }
 
 pub struct Storage {
@@ -73,6 +74,10 @@ fn database_actor_sync(rx: Receiver<StorageMessage>, mut shm: Option<ShmRingBuff
                 info!("Running LSM compaction (STUB)...");
             }
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            Ok(StorageMessage::Shutdown) => {
+                info!("Storage actor shutting down...");
+                break;
+            }
             Err(_) => break,
         }
     }

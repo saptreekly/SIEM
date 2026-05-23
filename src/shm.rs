@@ -82,3 +82,9 @@ impl ShmRingBuffer {
         }
     }
 }
+
+impl Drop for ShmRingBuffer {
+    fn drop(&mut self) {
+        // MmapMut is automatically unmapped when dropped.
+    }
+}

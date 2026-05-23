@@ -60,6 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     info!("SIEM listening on port 8080");
 
+    let mut terminate_signal = signal::unix::signal(signal::unix::SignalKind::terminate()).unwrap();
+
     loop {
         tokio::select! {
             res = listener.accept() => {
@@ -112,6 +114,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ = signal::ctrl_c() => {
                 info!("Shutdown signal received, shutting down...");
+                let _ = storage.tx.send(StorageMessage::Shutdown);
+                let _ = std::fs::remove_file(socket_path);
+                break;
+            }
+            _ = terminate_signal.recv() => {
+                info!("SIGTERM received, shutting down...");
+                let _ = storage.tx.send(StorageMessage::Shutdown);
                 let _ = std::fs::remove_file(socket_path);
                 break;
             }
