@@ -11,6 +11,7 @@ extern "C" {
 
 // Define a structured representation of the log
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[repr(C)]
 pub struct LogEvent {
     pub timestamp: i64,
     pub severity: CompactString,
