@@ -128,7 +128,7 @@ fn flush_batch(conn: &mut Connection, batch: &mut Vec<LogEvent>) {
                 event.severity.as_str(), 
                 event.source_ip.as_str(), 
                 event.facility.as_str(), 
-                event.message
+                event.message.as_str()
             ]).unwrap();
         }
     }

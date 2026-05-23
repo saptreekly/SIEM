@@ -1,30 +1,32 @@
 # SIEM: Lightweight, High-Velocity Log Management
 
 ![Rust](https://img.shields.io/badge/language-Rust-blue.svg)
+![Zig](https://img.shields.io/badge/language-Zig-yellow.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Status](https://img.shields.io/badge/status-Alpha-orange.svg)
+![Status](https://img.shields.io/badge/status-Production--Ready-brightgreen.svg)
 
 ## Why this SIEM?
 
-I am building this custom, hyper-optimized SIEM because I am deeply frustrated with the bloat, complexity, and exorbitant costs of enterprise solutions like Elastic and Splunk. 
+I built this custom, hyper-optimized SIEM because I am deeply frustrated with the bloat, complexity, and exorbitant costs of enterprise solutions like Elastic and Splunk. 
 
 I needed a system that is:
-*   **Lean:** Minimal resource footprint.
-*   **Fast:** Zero-copy parsing and high-throughput ingestion.
-*   **Maintainable:** Simple architecture with automated data lifecycle management (Hot/Warm/Cold tiering).
+*   **Lean:** Minimal resource footprint with zero-allocation paths.
+*   **Fast:** O(1) deduplication and high-throughput ingestion.
+*   **Maintainable:** Simple architecture with automated data lifecycle management.
 *   **Self-Contained:** No massive distributed cluster required for basic operations.
-
-This project is my attempt to reclaim simplicity and performance in log management.
 
 ## Architecture Highlights
 
-*   **Ingestion Pipeline:** Asynchronous TCP ingestion decoupled by an MPSC channel for maximum ingestion velocity.
-*   **Optimized Parser:** Zero-copy log parsing utilizing `nom` for extreme efficiency.
+*   **Ingestion Pipeline:** Asynchronous TCP ingestion decoupled by an MPSC channel, featuring a **direct-mapped O(1) deduplication cache** using bitwise masking.
+*   **Optimized Parser:** Zero-heap parsing utilizing `nom` and `CompactString` for stack-allocated storage.
+*   **Assembly Acceleration:** FNV-1a deduplication and ISO-8601 parsing implemented in standalone **x86_64/AArch64 assembly** for SIMD-ready performance.
+*   **Actor-Based Storage:** Dedicated `database_actor` serializing database operations to eliminate lock contention.
 *   **Automated Storage Tiering:** 
-    *   **Hot Tier:** WAL-indexed SQLite for fast, concurrent writes.
+    *   **Hot Tier:** WAL-indexed SQLite (SSD/High-IOPS).
     *   **Warm Tier:** Optimized SQLite for historical query.
     *   **Cold Tier:** Automated export to compressed storage.
-*   **Janitor:** Background maintenance tasks that handle data migration and optimization without blocking ingestion.
+*   **Janitor:** Background maintenance tasks that handle data migration without blocking ingestion.
+*   **Edge Agent:** High-performance, zero-allocation UDP-to-TCP forwarder implemented in **Zig**.
 
 ## License
 

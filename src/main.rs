@@ -31,16 +31,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::spawn(async move {
                     let reader = BufReader::new(socket);
                     let mut lines = reader.lines();
-                    let mut dedup_cache = [u32::MAX; 1000];
-                    let mut cache_idx = 0;
+                    let mut dedup_cache = [0u32; 2048];
                     
                     while let Ok(Some(line)) = lines.next_line().await {
                         let hash = fnv1a_hash(line.as_bytes());
-                        if dedup_cache.contains(&hash) {
-                            continue; // Drop duplicate
+                        let slot_idx = (hash as usize) & 2047;
+
+                        if dedup_cache[slot_idx] == hash {
+                            continue; // O(1) Drop duplicate
                         }
-                        dedup_cache[cache_idx] = hash;
-                        cache_idx = (cache_idx + 1) % 1000;
+                        dedup_cache[slot_idx] = hash;
                         
                         if let Some(event) = parse_log(&line) {
                             if let Err(e) = storage_tx.send(StorageMessage::Insert(event)).await {
