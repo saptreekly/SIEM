@@ -9,8 +9,9 @@ defmodule SiemSupervisor.RustProcess do
   @impl true
   def init(:ok) do
     # Start the Rust SIEM process
-    port = Port.open({:spawn, "/Users/jackweekly/Desktop/SIEM/target/debug/siem"}, [:binary, :exit_status])
-    {:ok, %{port: port}}
+    executable = Path.join(File.cwd!(), "target/release/siem")
+    port = Port.open({:spawn, executable}, [:binary, :exit_status])
+    {:ok, %{port: port, executable: executable}}
   end
 
   @impl true
@@ -23,7 +24,7 @@ defmodule SiemSupervisor.RustProcess do
   def handle_info({_port, {:exit_status, status}}, state) do
     Logger.error("Rust SIEM crashed with status #{status}. Restarting...")
     # Restart the process
-    port = Port.open({:spawn, "/Users/jackweekly/Desktop/SIEM/target/debug/siem"}, [:binary, :exit_status])
+    port = Port.open({:spawn, state.executable}, [:binary, :exit_status])
     {:noreply, %{state | port: port}}
   end
 end
@@ -32,6 +33,7 @@ defmodule SiemSupervisor.ControlClient do
 
   def send_command(node_id, command) do
     # Assuming each node has a dedicated socket path based on ID
+    # Matches /tmp/siem_control_performer_*.sock
     socket_path = "/tmp/siem_control_#{node_id}.sock"
     case :gen_tcp.connect({:local, ~c"#{socket_path}"}, 0, [:binary, packet: 0]) do
       {:ok, socket} ->

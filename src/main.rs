@@ -21,16 +21,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
     
-    let storage = Arc::new(Storage::new());
     let threshold = Arc::new(AtomicU64::new(100)); // Default threshold
     let is_ingestion_enabled = Arc::new(AtomicBool::new(true));
+
+    // Initialize SHM and pass to Storage
+    info!("Initializing SHM...");
+    let shm = ShmRingBuffer::new();
+    let storage = Arc::new(Storage::new(Some(shm)));
 
     // Spawn Janitor
     let janitor_tx = storage.tx.clone();
     thread::spawn(move || storage::run_janitor(janitor_tx));
 
     // Spawn Control Plane
-    let node_name = format!("performer-{}", std::process::id());
+    let node_name = format!("performer_{}", std::process::id());
     let socket_path = format!("/tmp/siem_control_{}.sock", node_name);
     let control_threshold = Arc::clone(&threshold);
     let control_enabled = Arc::clone(&is_ingestion_enabled);
@@ -42,9 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mesh_clone = Arc::clone(&gossip_mesh);
     tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
 
-    // Spawn SHM Reader Task
-    info!("Starting SHM Reader...");
-    let _shm = ShmRingBuffer::new();
+    // Initialize SHM and pass to Storage
+    info!("Initializing SHM...");
+    let shm = ShmRingBuffer::new();
+    let storage = Arc::new(Storage::new(Some(shm)));
+
     let enabled = Arc::clone(&is_ingestion_enabled);
     thread::spawn(move || {
         loop {
@@ -91,15 +97,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         
                         // Check global Gossip hashes
-                        if mesh.recent_hashes.read().unwrap().contains(&hash) {
+                        if mesh.recent_hashes[slot_idx].load(Ordering::Relaxed) == hash {
                              continue;
                         }
                         
                         dedup_cache[slot_idx] = hash;
-                        mesh.recent_hashes.write().unwrap().push(hash);
-                        if mesh.recent_hashes.read().unwrap().len() > 100 { 
-                            mesh.recent_hashes.write().unwrap().remove(0); 
-                        }
+                        mesh.recent_hashes[slot_idx].store(hash, Ordering::Relaxed);
                         
                         if let Some(event) = parse_log(&line) {
                             if let Err(e) = storage_tx.send(StorageMessage::Insert(event)) {

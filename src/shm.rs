@@ -1,11 +1,12 @@
 use memmap2::MmapMut;
 use std::fs::{OpenOptions};
+use siem::LogEvent;
 
 pub const SHM_PATH: &str = "/tmp/siem_shm.bin";
 pub const SHM_SIZE: usize = 1024 * 1024; // 1MB
 
 pub struct ShmRingBuffer {
-    _mmap: MmapMut,
+    mmap: MmapMut,
 }
 
 impl ShmRingBuffer {
@@ -21,6 +22,22 @@ impl ShmRingBuffer {
         
         let mmap = unsafe { MmapMut::map_mut(&file).expect("Failed to mmap") };
         
-        ShmRingBuffer { _mmap: mmap }
+        ShmRingBuffer { mmap }
+    }
+
+    pub fn write_event(&mut self, event: &LogEvent) {
+        // Simple ring buffer: [head:8][tail:8][data...]
+        // In a real implementation, use atomic head/tail.
+        // For this prototype, we'll write at a fixed offset after header.
+        let data = bincode::serialize(event).expect("Failed to serialize");
+        let len = data.len();
+        if len + 16 > SHM_SIZE { return; } // Too large
+
+        unsafe {
+            let ptr = self.mmap.as_mut_ptr();
+            // Write length then data
+            std::ptr::copy_nonoverlapping(len.to_le_bytes().as_ptr(), ptr.add(16), 8);
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.add(24), len);
+        }
     }
 }

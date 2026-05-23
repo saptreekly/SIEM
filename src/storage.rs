@@ -7,6 +7,7 @@ use siem::LogEvent;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::time::{Duration};
 use bincode;
+use crate::shm::ShmRingBuffer;
 
 pub enum StorageMessage {
     Insert(LogEvent),
@@ -18,14 +19,14 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new() -> Self {
+    pub fn new(shm: Option<ShmRingBuffer>) -> Self {
         fs::create_dir_all("./storage/hot").unwrap();
         fs::create_dir_all("./storage/warm").unwrap();
         fs::create_dir_all("./storage/cold").unwrap();
 
         let (tx, rx) = unbounded::<StorageMessage>();
         std::thread::spawn(move || {
-            database_actor_sync(rx);
+            database_actor_sync(rx, shm);
         });
         Storage { tx }
     }
@@ -35,7 +36,7 @@ struct MemTable {
     data: BTreeMap<i64, LogEvent>,
 }
 
-fn database_actor_sync(rx: Receiver<StorageMessage>) {
+fn database_actor_sync(rx: Receiver<StorageMessage>, mut shm: Option<ShmRingBuffer>) {
     let mut memtable = MemTable { data: BTreeMap::new() };
     let wal_file = fs::OpenOptions::new()
         .append(true)
@@ -54,6 +55,11 @@ fn database_actor_sync(rx: Receiver<StorageMessage>) {
                 wal_writer.write_all(b"
 ").expect("Failed to write newline to WAL");
                 wal_writer.flush().expect("Failed to flush WAL");
+                
+                // Write to SHM
+                if let Some(ref mut shm_buf) = shm {
+                    shm_buf.write_event(&event);
+                }
 
                 // Update MemTable
                 memtable.data.insert(event.timestamp, event);
