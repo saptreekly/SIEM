@@ -5,11 +5,11 @@ import "core:os"
 import "core:time"
 import "core:mem"
 
-SHM_SIZE :: 1024 * 1024; // 1MB
-HEAD_OFFSET :: 0;
-TAIL_OFFSET :: 4;
-DATA_OFFSET :: 8;
-DATA_SIZE :: SHM_SIZE - DATA_OFFSET;
+SHM_SIZE    :: 1024 * 1024
+HEAD_OFFSET :: 0
+TAIL_OFFSET :: 4
+DATA_OFFSET :: 8
+DATA_SIZE   :: SHM_SIZE - DATA_OFFSET
 
 LogEvent :: struct {
     timestamp: i64,
@@ -27,14 +27,15 @@ main :: proc() {
     }
     defer os.close(fd)
 
+    // Using Odin's OS memory map
     data, mmap_err := os.map_file(fd, os.O_RDWR, SHM_SIZE, 0)
     if mmap_err != os.ERROR_NONE {
         fmt.eprintln("Error mmapping /tmp/siem_shm.bin")
         return
     }
     defer os.unmap_file(data)
-
-    hot_window := make([dynamic]^LogEvent)
+    
+    hot_window := make([dynamic]LogEvent)
     defer delete(hot_window)
 
     fmt.println("Odin Analytics Engine: Started reading raw structs from /tmp/siem_shm.bin")
@@ -46,13 +47,14 @@ main :: proc() {
         head := head_ptr^
         tail := tail_ptr^
 
-        if (head == tail) {
+        if head == tail {
             time.sleep(10 * time.Millisecond)
             continue
         }
 
         event_ptr := cast(^LogEvent)&data[DATA_OFFSET + tail]
-        append(&hot_window, event_ptr)
+        
+        append(&hot_window, event_ptr^)
         
         fmt.printf("Processed Event: TS=%d\n", event_ptr.timestamp)
         
