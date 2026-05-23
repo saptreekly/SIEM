@@ -3,7 +3,7 @@ package siem_analytics
 import "core:fmt"
 import "core:os"
 import "core:time"
-import "core:mem"
+import "core:sys/posix"
 
 SHM_SIZE    :: 1024 * 1024
 HEAD_OFFSET :: 0
@@ -27,14 +27,23 @@ main :: proc() {
     }
     defer os.close(fd)
 
-    // Using Odin's OS memory map
-    data, mmap_err := os.map_file(fd, os.O_RDWR, SHM_SIZE, 0)
-    if mmap_err != os.ERROR_NONE {
-        fmt.eprintln("Error mmapping /tmp/siem_shm.bin")
+    // Using POSIX constants from core:sys/posix
+    addr, mmap_err := posix.mmap(
+        nil, 
+        SHM_SIZE, 
+        posix.PROT_READ | posix.PROT_WRITE, 
+        posix.MAP_SHARED, 
+        i32(os.get_fd(fd)), 
+        0,
+    )
+    if mmap_err != .NONE {
+        fmt.eprintln("Error mmapping /tmp/siem_shm.bin:", mmap_err)
         return
     }
-    defer os.unmap_file(data)
-    
+    defer posix.munmap(addr, SHM_SIZE)
+
+    data := ([^]u8)(addr)[:SHM_SIZE]
+
     hot_window := make([dynamic]LogEvent)
     defer delete(hot_window)
 
@@ -52,8 +61,7 @@ main :: proc() {
             continue
         }
 
-        event_ptr := cast(^LogEvent)&data[DATA_OFFSET + tail]
-        
+        event_ptr := cast(^LogEvent)&data[DATA_OFFSET + int(tail)]
         append(&hot_window, event_ptr^)
         
         fmt.printf("Processed Event: TS=%d\n", event_ptr.timestamp)
