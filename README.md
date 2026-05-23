@@ -17,10 +17,37 @@ I needed a system that is:
 *   **Fast:** O(1) deduplication and high-throughput ingestion.
 *   **Fault-Tolerant:** Embraces the "Let it Fail" philosophy via supervised process management.
 *   **Self-Contained:** No massive distributed cluster required for basic operations.
-
 ## Architecture Highlights
 
 This is a polyglot, ensemble-based architecture designed for extreme performance and fault-tolerance:
+
+```mermaid
+graph TD
+    subgraph Edge_Agent [Zig Forwarder]
+        UDP[UDP Syslog 514] --> Forwarder[Zig Daemon]
+    end
+
+    subgraph SIEM_Core [Rust Core Engine]
+        Listener[TCP Listener 8080] --> Ingest[Ingestion Pipeline]
+        Ingest --> Dedup{O(1) Dedup Cache}
+        Dedup --> Parser[Assembly Parser]
+        Parser --> MPSC[MPSC Channel]
+        MPSC --> Actor[Database Actor Thread]
+        Actor --> SQLite[(Hot/Warm DB)]
+        SQLite --> Janitor[Janitor Lifecycle]
+    end
+
+    subgraph Control_Plane [Elixir Conductor]
+        Supervisor[GenServer Supervisor] -- UDS (/tmp/siem.sock) --> Engine[Rust Core]
+        GossipListener[UDP Gossip Registry] -.-> Performers[Cluster Peers]
+    end
+
+    subgraph Analytics [Odin Correlation]
+        Engine -- Stream --> Odin[Odin Engine]
+    end
+
+    Forwarder -- TCP 8080 --> Listener
+```
 
 *   **Ingestion Pipeline (Rust):** Asynchronous TCP ingestion decoupled by an MPSC channel, featuring a **direct-mapped O(1) deduplication cache** using bitwise masking.
 *   **Control Plane (Elixir):** A robust **GenServer-based supervisor** that monitors the Rust core, providing fault-tolerance, automated restarts, and dynamic control interfaces via Unix Domain Sockets (UDS).
@@ -33,7 +60,9 @@ This is a polyglot, ensemble-based architecture designed for extreme performance
     *   **Hot Tier:** WAL-indexed SQLite.
     *   **Warm Tier:** Optimized SQLite for historical query.
     *   **Cold Tier:** Automated export to compressed storage.
+*   **Janitor:** Background maintenance tasks that handle data migration without blocking ingestion.
 *   **Edge Agent (Zig):** High-performance, zero-allocation UDP-to-TCP forwarder implemented in **Zig**.
+
 
 ## License
 
