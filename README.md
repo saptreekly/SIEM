@@ -27,23 +27,21 @@ graph TD
         UDP[UDP Syslog 514] --> Forwarder[Zig Daemon]
     end
 
-    subgraph SIEM_Core [Rust Core Engine]
+    subgraph SIEM_Core [Rust Core Performer]
         Listener[TCP Listener 8080] --> Ingest[Ingestion Pipeline]
-        Ingest --> Dedup{O(1) Dedup Cache}
+        Ingest --> Dedup{"O(1) Dedup Cache"}
+        Dedup <--> Gossip[Gossip Mesh]
         Dedup --> Parser[Assembly Parser]
         Parser --> MPSC[MPSC Channel]
         MPSC --> Actor[Database Actor Thread]
         Actor --> SQLite[(Hot/Warm DB)]
+        Actor -- FIFO Stream --> Odin[Odin Analytics Engine]
         SQLite --> Janitor[Janitor Lifecycle]
     end
 
     subgraph Control_Plane [Elixir Conductor]
-        Supervisor[GenServer Supervisor] -- UDS (/tmp/siem.sock) --> Engine[Rust Core]
+        Supervisor[GenServer Supervisor] -- UDS Control --> Listener
         GossipListener[UDP Gossip Registry] -.-> Performers[Cluster Peers]
-    end
-
-    subgraph Analytics [Odin Correlation]
-        Engine -- Stream --> Odin[Odin Engine]
     end
 
     Forwarder -- TCP 8080 --> Listener

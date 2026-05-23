@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection};
 use std::fs;
 use std::thread;
+use std::process::Command;
 use tracing::{info};
 use siem::LogEvent;
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -21,18 +22,27 @@ impl Storage {
         fs::create_dir_all("./storage/warm").unwrap();
         fs::create_dir_all("./storage/cold").unwrap();
 
+        // Fetch key from Zig agent
+        let output = Command::new("./tools/key_agent")
+            .output()
+            .expect("Failed to execute key_agent");
+        
+        let key = String::from_utf8(output.stdout).expect("Failed to parse key");
+        let key = key.trim().to_string();
+
         let (tx, rx) = unbounded::<StorageMessage>();
 
         thread::spawn(move || {
-            database_actor_sync(rx);
+            database_actor_sync(rx, key);
         });
 
         Storage { tx }
     }
 }
 
-fn database_actor_sync(rx: Receiver<StorageMessage>) {
+fn database_actor_sync(rx: Receiver<StorageMessage>, key: String) {
     let mut hot_conn = Connection::open("storage/hot/hot_logs.db").expect("Failed to open hot db");
+    hot_conn.pragma_update(None, "key", &key).expect("Failed to set hot DB key");
     hot_conn.busy_timeout(Duration::from_secs(5)).expect("Failed to set busy timeout");
     hot_conn.pragma_update(None, "journal_mode", "WAL").expect("Failed to set WAL mode");
     
@@ -50,6 +60,7 @@ fn database_actor_sync(rx: Receiver<StorageMessage>) {
     ).expect("Failed to initialize hot database schema");
 
     let mut warm_conn = Connection::open("storage/warm/warm_logs.db").expect("Failed to open warm db");
+    warm_conn.pragma_update(None, "key", &key).expect("Failed to set warm DB key");
     warm_conn.execute(
         "CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

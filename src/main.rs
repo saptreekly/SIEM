@@ -4,8 +4,9 @@ use tokio::signal;
 use siem::{parse_log, crypto::fnv1a_hash};
 use tracing::{info, warn, error, info_span};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use std::thread;
+use std::time::Duration;
 
 mod storage;
 mod control;
@@ -22,6 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let storage = Arc::new(Storage::new());
     let threshold = Arc::new(AtomicU64::new(100)); // Default threshold
+    let is_ingestion_enabled = Arc::new(AtomicBool::new(true));
 
     // Spawn Janitor
     let janitor_tx = storage.tx.clone();
@@ -31,8 +33,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_name = format!("performer-{}", std::process::id());
     let socket_path = format!("/tmp/siem_control_{}.sock", node_name);
     let control_threshold = Arc::clone(&threshold);
+    let control_enabled = Arc::clone(&is_ingestion_enabled);
     let sp_clone = socket_path.clone();
-    tokio::spawn(control::start_control_listener(sp_clone, control_threshold));
+    tokio::spawn(control::start_control_listener(sp_clone, control_threshold, control_enabled));
 
     // Spawn Gossip Mesh
     let gossip_mesh = Arc::new(GossipMesh::new(10000));
@@ -50,12 +53,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 let storage_tx = storage.tx.clone();
                 let mesh = Arc::clone(&gossip_mesh);
+                let ingestion_enabled = Arc::clone(&is_ingestion_enabled);
+                
                 tokio::spawn(async move {
                     let reader = BufReader::new(socket);
                     let mut lines = reader.lines();
                     let mut dedup_cache = [u32::MAX; 2048];
                     
                     while let Ok(Some(line)) = lines.next_line().await {
+                        // Check if ingestion is paused
+                        if !ingestion_enabled.load(Ordering::Relaxed) {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            continue;
+                        }
+
                         let _span = info_span!("ingest_log", addr = %addr).entered();
                         let hash = fnv1a_hash(line.as_bytes());
                         let slot_idx = (hash as usize) & 2047;
