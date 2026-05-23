@@ -28,11 +28,14 @@ impl ShmRingBuffer {
     }
 
     pub fn write_event(&mut self, event: &LogEvent) {
-        let data = format!("{:?}", event).into_bytes();
-        let len = data.len();
-        if len + 4 > DATA_SIZE { return; } // Simplified: check if fits at all
-
+        let size = std::mem::size_of::<LogEvent>();
+        
         unsafe {
+            let data_slice = std::slice::from_raw_parts(
+                event as *const LogEvent as *const u8,
+                size
+            );
+
             let ptr = self.mmap.as_mut_ptr();
             
             // Read current head
@@ -41,13 +44,13 @@ impl ShmRingBuffer {
             
             // Write data with wrapping
             let write_pos = head as usize;
-            for i in 0..len {
+            for i in 0..size {
                 let pos = (write_pos + i) % DATA_SIZE;
-                std::ptr::write_volatile(ptr.add(HEADER_SIZE + pos), data[i]);
+                std::ptr::write_volatile(ptr.add(HEADER_SIZE + pos), data_slice[i]);
             }
             
             // Update head
-            let new_head = (head + len as u32) % DATA_SIZE as u32;
+            let new_head = (head + size as u32) % DATA_SIZE as u32;
             std::ptr::write_volatile(head_ptr, new_head);
         }
     }
