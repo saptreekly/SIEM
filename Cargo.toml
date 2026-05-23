@@ -19,3 +19,6 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "parser_bench"
 harness = false
+
+[build-dependencies]
+cc = "1.0"

@@ -1,3 +1,6 @@
+pub mod crypto;
+pub use crypto::fnv1a_hash;
+
 use nom::{
     bytes::complete::take_until,
     character::complete::char,
