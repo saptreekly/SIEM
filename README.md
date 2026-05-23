@@ -1,9 +1,10 @@
 # SIEM: Lightweight, High-Velocity Log Management
 
-![Rust](https://img.shields.io/badge/language-Rust-blue.svg)
-![Zig](https://img.shields.io/badge/language-Zig-yellow.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Status](https://img.shields.io/badge/status-Production--Ready-brightgreen.svg)
+[![Rust](https://img.shields.io/badge/language-Rust-blue.svg)](https://www.rust-lang.org/)
+[![Zig](https://img.shields.io/badge/language-Zig-yellow.svg)](https://ziglang.org/)
+[![Assembly](https://img.shields.io/badge/language-Assembly-red.svg)](https://www.felixcloutier.com/x86/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Status](https://img.shields.io/badge/status-Production--Ready-brightgreen.svg)](https://github.com/saptreekly/SIEM/issues)
 
 ## Why this SIEM?
 
