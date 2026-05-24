@@ -59,55 +59,57 @@ pub fn main() !void {
         _ = sem_wait(sem);
         tail = @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).*;
         head = @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).*;
-        
-        // Construct mock event
-        var t: i64 = 0;
-        var event = std.mem.zeroInit(LogEvent, .{
-            .timestamp = time(&t),
-            .severity = std.mem.zeroes([24]u8),
-            .source_ip = std.mem.zeroes([24]u8),
-            .facility = std.mem.zeroes([24]u8),
-            .message = std.mem.zeroes([24]u8),
-        });
-        
-        // Fill fields
-        const severity = "INFO";
-        const source_ip = "127.0.0.1";
-        const facility = "auth";
-        const message = "test log";
-        
-        std.mem.copyForwards(u8, &event.severity, severity);
-        std.mem.copyForwards(u8, &event.source_ip, source_ip);
-        std.mem.copyForwards(u8, &event.facility, facility);
-        std.mem.copyForwards(u8, &event.message, message);
 
         const event_size = @sizeOf(LogEvent);
+        var head_to_write = head;
+        var can_fit = false;
 
-        var available_space: u32 = 0;
-        if (head >= tail) {
-            available_space = @as(u32, @intCast(DATA_SIZE)) - (head - tail);
+        // Check if it fits without wrapping
+        if (head + event_size <= DATA_SIZE) {
+            if (head >= tail) {
+                if ((DATA_SIZE - head) + tail >= event_size) can_fit = true;
+            } else {
+                if (tail - head >= event_size) can_fit = true;
+            }
         } else {
-            available_space = tail - head;
+            // Must wrap, check if it fits at 0
+            if (tail >= event_size) {
+                head_to_write = 0;
+                can_fit = true;
+            }
         }
 
-        if (available_space > event_size) {
-            // Check for wrap-around
-            if (head + event_size > DATA_SIZE) {
-                // If the struct wraps around, it's safer to reset head or skip.
-                // For simplicity, just wrap head to 0.
-                head = 0;
-            }
+        if (can_fit) {
+            // Construct mock event
+            var t: i64 = 0;
+            var event = std.mem.zeroInit(LogEvent, .{
+                .timestamp = time(&t),
+                .severity = std.mem.zeroes([24]u8),
+                .source_ip = std.mem.zeroes([24]u8),
+                .facility = std.mem.zeroes([24]u8),
+                .message = std.mem.zeroes([24]u8),
+            });
+            
+            // Fill fields
+            const severity = "INFO";
+            const source_ip = "127.0.0.1";
+            const facility = "auth";
+            const message = "test log";
+            
+            std.mem.copyForwards(u8, &event.severity, severity);
+            std.mem.copyForwards(u8, &event.source_ip, source_ip);
+            std.mem.copyForwards(u8, &event.facility, facility);
+            std.mem.copyForwards(u8, &event.message, message);
             
             // Copy struct bytes
             const event_bytes: [*]const u8 = @ptrCast(&event);
-            @memcpy(data_buffer[head .. head + event_size], event_bytes[0..event_size]);
+            @memcpy(data_buffer[head_to_write .. head_to_write + event_size], event_bytes[0..event_size]);
             
-            head += @as(u32, @intCast(event_size));
+            head = head_to_write + @as(u32, @intCast(event_size));
             @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = head;
-        }
-        _ = sem_post(sem);
-        
-        if (available_space <= event_size) {
+            _ = sem_post(sem);
+        } else {
+            _ = sem_post(sem);
             _ = usleep(10000); // 10ms
         }
     }

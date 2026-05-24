@@ -103,6 +103,11 @@ main :: proc() {
             continue
         }
 
+        // Handle wrap-around
+        if int(tail) + size_of(LogEvent) > DATA_SIZE {
+            tail = 0;
+        }
+
         // Overlay our LogEvent structure blueprint exactly where the tail offset indicates
         event_ptr := cast(^LogEvent)&data[DATA_OFFSET + int(tail)]
         
