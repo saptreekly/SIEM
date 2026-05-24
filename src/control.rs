@@ -11,7 +11,7 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
     info!("Control plane hardened and listening on: {}", control_address);
 
     loop {
-        match listener.accept().await {
+        match listener.accept() {
             Ok((stream, addr)) => {
                 info!("Accepted control connection from: {}", addr);
                 let threshold_clone = Arc::clone(&threshold);
