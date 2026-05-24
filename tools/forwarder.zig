@@ -7,12 +7,21 @@ const TAIL_OFFSET: usize = 4;
 const DATA_OFFSET: usize = 8;
 const DATA_SIZE: usize = SHM_SIZE - DATA_OFFSET;
 
+const LogEvent = extern struct {
+    timestamp: i64,
+    severity: [24]u8,
+    source_ip: [24]u8,
+    facility: [24]u8,
+    message: [24]u8,
+};
+
 // Stable POSIX C FFI to shield the application from Zig standard library namespace changes
 extern "c" fn open(path: [*:0]const u8, flags: c_int, mode: c_uint) c_int;
 extern "c" fn mmap(addr: ?*anyopaque, len: usize, prot: c_int, flags: c_int, fd: c_int, offset: i64) ?*anyopaque;
 extern "c" fn munmap(addr: *anyopaque, len: usize) c_int;
 extern "c" fn close(fd: c_int) c_int;
 extern "c" fn usleep(useconds: c_uint) c_int;
+extern "c" fn time(t: *i64) i64;
 
 const O_RDWR = 0x0002;
 const O_CREAT = 0x0200;
@@ -37,11 +46,33 @@ pub fn main() !void {
 
     var head: u32 = 0;
     var tail: u32 = 0;
-    const mock_log = "<34>1 2026-05-23T16:00:00Z test_service: This is a test log\n";
-    const log_len: u32 = @intCast(mock_log.len);
 
     while (true) {
         tail = @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).*;
+        
+        // Construct mock event
+        var t: i64 = 0;
+        var event = std.mem.zeroInit(LogEvent, .{
+            .timestamp = time(&t),
+            .severity = std.mem.zeroes([24]u8),
+            .source_ip = std.mem.zeroes([24]u8),
+            .facility = std.mem.zeroes([24]u8),
+            .message = std.mem.zeroes([24]u8),
+        });
+        
+        // Fill fields
+        const severity = "INFO";
+        const source_ip = "127.0.0.1";
+        const facility = "auth";
+        const message = "test log";
+        
+        std.mem.copyForwards(u8, &event.severity, severity);
+        std.mem.copyForwards(u8, &event.source_ip, source_ip);
+        std.mem.copyForwards(u8, &event.facility, facility);
+        std.mem.copyForwards(u8, &event.message, message);
+
+        const event_size = @sizeOf(LogEvent);
+
         var available_space: u32 = 0;
         if (head >= tail) {
             available_space = @as(u32, @intCast(DATA_SIZE)) - (head - tail);
@@ -49,20 +80,22 @@ pub fn main() !void {
             available_space = tail - head;
         }
 
-        if (available_space > log_len + 1) {
-            if (head + log_len > DATA_SIZE) {
-                const first_part_len: u32 = @intCast(DATA_SIZE - head);
-                @memcpy(data_buffer[head .. head + first_part_len], mock_log[0 .. first_part_len]);
+        if (available_space > event_size) {
+            // Check for wrap-around
+            if (head + event_size > DATA_SIZE) {
+                // If the struct wraps around, it's safer to reset head or skip.
+                // For simplicity, just wrap head to 0.
                 head = 0;
-                @memcpy(data_buffer[head .. head + (log_len - first_part_len)], mock_log[first_part_len ..]);
-                head += (log_len - first_part_len);
-            } else {
-                @memcpy(data_buffer[head .. head + log_len], mock_log);
-                head += log_len;
             }
+            
+            // Copy struct bytes
+            const event_bytes: [*]const u8 = @ptrCast(&event);
+            @memcpy(data_buffer[head .. head + event_size], event_bytes[0..event_size]);
+            
+            head += @as(u32, @intCast(event_size));
             @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = head;
         } else {
-            _ = usleep(10000); // 10ms yield via low-overhead POSIX C FFI
+            _ = usleep(10000); // 10ms
         }
     }
 }
