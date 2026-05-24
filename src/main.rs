@@ -34,14 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     thread::spawn(move || storage::run_janitor(janitor_tx));
 
     // Spawn Control Plane
-    let node_name = format!("performer_{}", std::process::id());
-    let socket_path = format!("/tmp/siem_control_{}.sock", node_name);
+    let control_address = "127.0.0.1:8081".to_string(); // Dedicated control port
     let control_threshold = Arc::clone(&threshold);
     let control_enabled = Arc::clone(&is_ingestion_enabled);
-    let sp_clone = socket_path.clone();
-    tokio::spawn(control::start_control_listener(sp_clone, control_threshold, control_enabled));
+    tokio::spawn(control::start_control_listener(control_address.clone(), control_threshold, control_enabled));
 
     // Spawn Gossip Mesh
+    let node_name = format!("performer_{}", std::process::id());
     let gossip_mesh = Arc::new(GossipMesh::new(10000));
     let mesh_clone = Arc::clone(&gossip_mesh);
     tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
@@ -115,13 +114,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ = signal::ctrl_c() => {
                 info!("Shutdown signal received, shutting down...");
                 let _ = storage.tx.send(StorageMessage::Shutdown);
-                let _ = std::fs::remove_file(socket_path);
                 break;
             }
             _ = terminate_signal.recv() => {
                 info!("SIGTERM received, shutting down...");
                 let _ = storage.tx.send(StorageMessage::Shutdown);
-                let _ = std::fs::remove_file(socket_path);
                 break;
             }
         }

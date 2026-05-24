@@ -1,26 +1,18 @@
-use tokio::net::{UnixListener};
+use tokio::net::{TcpListener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, error};
-use std::fs;
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
-use std::os::unix::fs::PermissionsExt;
 
-pub async fn start_control_listener(socket_path: String, threshold: Arc<AtomicU64>, ingestion_enabled: Arc<AtomicBool>) {
-    // Clean up existing socket file if it exists
-    let _ = fs::remove_file(&socket_path);
+pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_enabled: Arc<AtomicBool>) {
+    let listener = TcpListener::bind(&control_address).await.expect("Failed to bind to TCP control address");
 
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind to UDS");
-    
-    // Hardening: Restrict socket file permissions to owner-only (600)
-    let permissions = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(&socket_path, permissions).expect("Failed to set UDS permissions");
-
-    info!("Control plane hardened and listening on: {}", socket_path);
+    info!("Control plane hardened and listening on: {}", control_address);
 
     loop {
         match listener.accept().await {
-            Ok((mut stream, _)) => {
+            Ok((mut stream, addr)) => {
+                info!("Accepted control connection from: {}", addr);
                 let threshold_clone = Arc::clone(&threshold);
                 let enabled_clone = Arc::clone(&ingestion_enabled);
                 tokio::spawn(async move {
@@ -52,7 +44,11 @@ pub async fn start_control_listener(socket_path: String, threshold: Arc<AtomicU6
                                             let _ = stream.write_all(b"ACK: INGESTION RESUMED
 ").await;
                                         }
-                                        "PANIC" => panic!("Forced crash for testing!"),
+                                        "PANIC" => {
+                                            let _ = stream.write_all(b"ACK: Initiating panic!
+").await;
+                                            panic!("Forced crash for testing!")
+                                        },
                                         _ => {
                                             let response = format!("ACK: {}
 ", cmd);
@@ -61,12 +57,16 @@ pub async fn start_control_listener(socket_path: String, threshold: Arc<AtomicU6
                                     }
                                 }
                             }
-                            Err(_) => break,
+                            Err(e) => {
+                                error!("Error reading from control stream: {}", e);
+                                break;
+                            }
                         }
                     }
+                    info!("Control connection closed.");
                 });
             }
-            Err(e) => error!("UDS accept error: {}", e),
+            Err(e) => error!("TCP accept error: {}", e),
         }
     }
 }
