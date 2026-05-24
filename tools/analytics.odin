@@ -3,6 +3,7 @@ package siem_analytics
 import "core:fmt"
 import "core:os"
 import "core:time"
+import "core:mem"
 
 SHM_SIZE    :: 1024 * 1024
 HEAD_OFFSET :: 0
@@ -16,12 +17,22 @@ PROT_WRITE :: 0x02
 MAP_SHARED :: 0x0001
 MAP_FAILED :: rawptr(~uintptr(0))
 
-LogEvent :: struct {
+@(builtin)
+LogEvent :: struct #align(4) {
     timestamp: i64,
     severity:  [24]u8, 
     source_ip: [24]u8,
     facility:  [24]u8,
     message:   [24]u8,
+}
+
+// Zero-copy event processing
+process_event :: proc(event: ^LogEvent) {
+    // Process data in-place
+    fmt.printf("Processed Event: TS=%d, Msg=%s\n", event.timestamp, string(event.message[:]))
+    
+    // Clear slot for re-use
+    mem.set(event, 0, size_of(LogEvent))
 }
 
 // Bind directly to macOS system libc to bypass Odin standard library discrepancies
@@ -75,10 +86,7 @@ main :: proc() {
     // 3. Cast raw pointer allocation to a safe byte index array slice
     data := ([^]u8)(addr)[:SHM_SIZE]
 
-    hot_window := make([dynamic]LogEvent)
-    defer delete(hot_window)
-
-    fmt.println("Odin Analytics Engine: Started reading raw structs from /tmp/siem_shm.bin")
+    fmt.println("Odin Analytics Engine: Started reading raw structs from /tmp/siem_shm.bin (Zero-Copy)")
     
     event_count := 0
     for event_count < 500 {
@@ -97,7 +105,9 @@ main :: proc() {
 
         // Overlay our LogEvent structure blueprint exactly where the tail offset indicates
         event_ptr := cast(^LogEvent)&data[DATA_OFFSET + int(tail)]
-        append(&hot_window, event_ptr^)
+        
+        // Zero-copy processing
+        process_event(event_ptr)
         
         // Step forward in memory cleanly by the uniform size of our data struct
         tail = (tail + u32(size_of(LogEvent))) % u32(DATA_SIZE)
@@ -105,7 +115,5 @@ main :: proc() {
         sem_post(sem)
 
         event_count += 1
-        
-        fmt.printf("Processed Event %d: TS=%d\n", event_count, event_ptr.timestamp)
     }
 }
