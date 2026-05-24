@@ -1,12 +1,12 @@
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::atomic::AtomicU64;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use log::info;
 
-pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_endpoint: String) {
-    let listener = TcpListener::bind(&control_address).await.expect("Failed to bind to TCP control address");
+pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_endpoint: Arc<Mutex<String>>) {
+    let listener = TcpListener::bind(&control_address).expect("Failed to bind to TCP control address");
 
     info!("Control plane hardened and listening on: {}", control_address);
 
@@ -15,9 +15,10 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
             Ok((stream, addr)) => {
                 info!("Accepted control connection from: {}", addr);
                 let threshold_clone = Arc::clone(&threshold);
+                let ingestion_endpoint_clone = Arc::clone(&ingestion_endpoint);
                 tokio::spawn(async move {
                     let mut stream = stream;
-                    handle_control_connection(stream, threshold_clone, ingestion_endpoint.clone()).await;
+                    handle_control_connection(stream, threshold_clone, ingestion_endpoint_clone).await;
                 });
             }
             Err(e) => {
@@ -27,7 +28,7 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
     }
 }
 
-async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU64>, ingestion_endpoint: String) {
+async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU64>, ingestion_endpoint: Arc<Mutex<String>>) {
     // Handle incoming commands
     let mut buffer = [0; 1024];
     loop {
@@ -49,8 +50,13 @@ async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU
                         }
                     }
                     Some("INGESTION_ENDPOINT") => {
-                        ingestion_endpoint.lock().unwrap().replace(command.split_whitespace().nth(1).unwrap_or(""));
-                        stream.write_all(b"Ingestion endpoint updated\n").await.unwrap();
+                        if let Some(endpoint) = command.split_whitespace().nth(1) {
+                            let mut endpoint_lock = ingestion_endpoint.lock().unwrap();
+                            *endpoint_lock = endpoint.to_string();
+                            stream.write_all(b"Ingestion endpoint updated\n").await.unwrap();
+                        } else {
+                            stream.write_all(b"Missing ingestion endpoint\n").await.unwrap();
+                        }
                     }
                     _ => {
                         stream.write_all(b"Unknown command\n").await.unwrap();

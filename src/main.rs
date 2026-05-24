@@ -5,9 +5,10 @@ mod shm;
 mod storage;
 
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::atomic::AtomicU64;
 use log::info;
+use env_logger;
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +16,7 @@ async fn main() {
 
     let control_address = env::var("CONTROL_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8081".to_string());
     let threshold = Arc::new(AtomicU64::new(100));
-    let ingestion_endpoint = Arc::new(std::sync::Mutex::new("http://localhost:8080".to_string()));
+    let ingestion_endpoint = Arc::new(Mutex::new("http://localhost:8080".to_string()));
 
     tokio::spawn({
         let threshold_clone = Arc::clone(&threshold);
