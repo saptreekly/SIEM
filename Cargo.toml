@@ -36,3 +36,15 @@ cc = "1.0"
 
 [profile.release]
 debug = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.bench]
+opt-level = 3
+
+[profile.test]
+opt-level = 1
+
+[workspace]
+members = ["."]
