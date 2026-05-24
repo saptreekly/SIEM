@@ -3,11 +3,12 @@ mod crypto;
 mod gossip;
 mod shm;
 mod storage;
+mod dedup;
 
-use std::collections::HashSet;
 use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use crate::dedup::AtomicBitArray;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -55,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(gossip::start_gossip(node_name, 9000, mesh_clone));
 
     // Initialize O(1) Deduplication Cache
-    let dedup_cache = Arc::new(Mutex::new(HashSet::new()));
+    let dedup_cache = Arc::new(AtomicBitArray::new());
 
     // Bind core data ingestion loop
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
@@ -104,12 +105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let bucket = (hash & 0x7FF) as usize; // 2048 buckets
 
                                         // O(1) local dedup check
-                                        {
-                                            let mut cache = dedup_clone.lock().unwrap();
-                                            if cache.contains(&hash) {
-                                                continue;
-                                            }
-                                            cache.insert(hash);
+                                        if dedup_clone.check_and_set(hash as u64) {
+                                            continue;
                                         }
 
                                         // Evaluate gossip mesh check alongside local direct-mapped cache slot array
