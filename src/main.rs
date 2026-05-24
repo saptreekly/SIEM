@@ -17,15 +17,7 @@ use crate::shm::ShmRingBuffer;
 use crate::storage::{Storage, StorageMessage};
 use crate::gossip::GossipMesh;
 use crate::crypto::fnv1a_hash;
-
-#[derive(Debug, Clone)]
-pub struct LogEvent {
-    pub timestamp: i64,
-    pub severity: String,
-    pub source_ip: String,
-    pub facility: String,
-    pub message: String,
-}
+use crate::LogEvent;
 
 #[tokio::main]
 async fn main() {
