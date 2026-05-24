@@ -17,7 +17,7 @@ use crate::shm::ShmRingBuffer;
 use crate::storage::{Storage, StorageMessage};
 use crate::gossip::GossipMesh;
 use crate::crypto::fnv1a_hash;
-use crate::LogEvent;
+use siem::LogEvent;
 
 #[tokio::main]
 async fn main() {
