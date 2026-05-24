@@ -1,10 +1,11 @@
-use tokio::net::{TcpListener};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, error};
-use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+use std::net::TcpListener;
 use std::sync::Arc;
+use tokio::sync::atomic::AtomicU64;
+use tokio::net::TcpStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use log::info;
 
-pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_enabled: Arc<AtomicBool>) {
+pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_endpoint: String) {
     let listener = TcpListener::bind(&control_address).await.expect("Failed to bind to TCP control address");
 
     info!("Control plane hardened and listening on: {}", control_address);
@@ -14,59 +15,51 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
             Ok((mut stream, addr)) => {
                 info!("Accepted control connection from: {}", addr);
                 let threshold_clone = Arc::clone(&threshold);
-                let enabled_clone = Arc::clone(&ingestion_enabled);
                 tokio::spawn(async move {
-                    let mut buffer = [0; 1024];
-                    loop {
-                        match stream.read(&mut buffer).await {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                let command = String::from_utf8_lossy(&buffer[..n]);
-                                let cmd = command.trim();
-                                info!("Received control command: {}", cmd);
-
-                                if cmd.starts_with("SET_THRESHOLD ") {
-                                    if let Ok(val) = cmd[14..].parse::<u64>() {
-                                        threshold_clone.store(val, Ordering::Relaxed);
-                                        let response = format!("ACK: THRESHOLD SET TO {}
-", val);
-                                        let _ = stream.write_all(response.as_bytes()).await;
-                                    }
-                                } else {
-                                    match cmd {
-                                        "PAUSE_INGESTION" => {
-                                            enabled_clone.store(false, Ordering::Relaxed);
-                                            let _ = stream.write_all(b"ACK: INGESTION PAUSED
-").await;
-                                        }
-                                        "RESUME_INGESTION" => {
-                                            enabled_clone.store(true, Ordering::Relaxed);
-                                            let _ = stream.write_all(b"ACK: INGESTION RESUMED
-").await;
-                                        }
-                                        "PANIC" => {
-                                            let _ = stream.write_all(b"ACK: Initiating panic!
-").await;
-                                            panic!("Forced crash for testing!")
-                                        },
-                                        _ => {
-                                            let response = format!("ACK: {}
-", cmd);
-                                            let _ = stream.write_all(response.as_bytes()).await;
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error reading from control stream: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                    info!("Control connection closed.");
+                    handle_control_connection(mut stream, threshold_clone, ingestion_endpoint.clone()).await;
                 });
             }
-            Err(e) => error!("TCP accept error: {}", e),
+            Err(e) => {
+                eprintln!("Error accepting connection: {}", e);
+            }
+        }
+    }
+}
+
+async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU64>, ingestion_endpoint: String) {
+    // Handle incoming commands
+    let mut buffer = [0; 1024];
+    loop {
+        match stream.read(&mut buffer).await {
+            Ok(n) if n == 0 => break, // Connection closed
+            Ok(n) => {
+                let command = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
+                match command.split_whitespace().next() {
+                    Some("SET_THRESHOLD") => {
+                        if let Some(value) = command.split_whitespace().nth(1) {
+                            if let Ok(new_threshold) = value.parse::<u64>() {
+                                threshold.store(new_threshold, std::sync::atomic::Ordering::SeqCst);
+                                stream.write_all(b"Threshold updated\n").await.unwrap();
+                            } else {
+                                stream.write_all(b"Invalid threshold value\n").await.unwrap();
+                            }
+                        } else {
+                            stream.write_all(b"Missing threshold value\n").await.unwrap();
+                        }
+                    }
+                    Some("INGESTION_ENDPOINT") => {
+                        ingestion_endpoint.lock().unwrap().replace(command.split_whitespace().nth(1).unwrap_or(""));
+                        stream.write_all(b"Ingestion endpoint updated\n").await.unwrap();
+                    }
+                    _ => {
+                        stream.write_all(b"Unknown command\n").await.unwrap();
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading from stream: {}", e);
+                break;
+            }
         }
     }
 }
