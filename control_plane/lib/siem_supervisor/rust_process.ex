@@ -1,25 +1,51 @@
 defmodule SiemSupervisor.RustProcess do
   use GenServer
+  require Logger
+
+  @rust_binary "./target/release/siem"
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: opts[:name])
+    GenServer.start_link(__MODULE__, opts, name: opts[:name] || __MODULE__)
+  end
+
+  def init(opts) do
+    Process.flag(:trap_exit, true)
+    
+    # Launch the Rust core as a managed Port process
+    port = Port.open({:spawn, @rust_binary}, [:exit_status, :binary, :stderr_to_stdout])
+    
+    {:ok, %{port: port, node_id: opts[:node_id], status: :healthy}}
+  end
+
+  def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
+    Logger.error("Rust core exited with status #{status}. Waiting 2 seconds before restarting...")
+    # Give the OS time to release ports
+    Process.sleep(2000)
+    
+    # Restart the port
+    new_port = Port.open({:spawn, @rust_binary}, [:exit_status, :binary, :stderr_to_stdout])
+    {:noreply, %{state | port: new_port, status: :restarting}}
+  end
+
+  def handle_info({port, {:data, data}}, %{port: port} = state) do
+    Logger.debug("Rust core output: #{data}")
+    {:noreply, state}
   end
 
   def handle_info(:check_health, state) do
-    # Check health of the remote control socket
-    case SiemSupervisor.ControlClient.check_performer_health(state.ip_address, state.control_port) do
-      :ok ->
-        Logger.debug("Remote Rust Performer #{state.node_id} at #{state.ip_address}:#{state.control_port} is healthy.")
-        {:noreply, %{state | status: :healthy}}
-      {:error, reason} ->
-        Logger.warning("Remote Rust Performer #{state.node_id} at #{state.ip_address}:#{state.control_port} is unreachable. Reason: #{inspect(reason)}.")
-        {:noreply, %{state | status: :unreachable}}
-    end
+    # Still keep health check for internal status management if needed
+    {:noreply, state}
   end
 
-  def handle_info({:EXIT, _pid, reason}, state) do
-    Logger.error("GenServer for #{state.node_id} exited: #{inspect(reason)}")
-    {:noreply, %{state | status: :exited}}
+  def handle_info(msg, state) do
+    Logger.debug("Unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  def terminate(reason, state) do
+    Logger.info("Rust process manager terminating. Reason: #{inspect(reason)}")
+    Port.close(state.port)
+    :ok
   end
 end
 
