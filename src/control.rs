@@ -16,7 +16,7 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
                 let threshold_clone = Arc::clone(&threshold);
                 let ingestion_endpoint_clone = Arc::clone(&ingestion_endpoint);
                 tokio::spawn(async move {
-                    let mut stream = stream;
+                    let stream = stream;
                     handle_control_connection(stream, threshold_clone, ingestion_endpoint_clone).await;
                 });
             }

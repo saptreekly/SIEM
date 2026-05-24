@@ -9,7 +9,7 @@ use std::env;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use log::info;
 use env_logger;
 
@@ -17,7 +17,15 @@ use crate::shm::ShmRingBuffer;
 use crate::storage::{Storage, StorageMessage};
 use crate::gossip::GossipMesh;
 use crate::crypto::fnv1a_hash;
-use crate::LogEvent;
+
+#[derive(Debug, Clone)]
+pub struct LogEvent {
+    pub timestamp: i64,
+    pub severity: String,
+    pub source_ip: String,
+    pub facility: String,
+    pub message: String,
+}
 
 #[tokio::main]
 async fn main() {
@@ -43,13 +51,7 @@ async fn main() {
 
     // Initialize Gossip Mesh
     let mesh = Arc::new(GossipMesh {
-        recent_hashes: {
-            let mut arr = [AtomicU32::new(0); 2048];
-            for item in arr.iter_mut() {
-                *item = AtomicU32::new(0);
-            }
-            Arc::new(arr)
-        },
+        recent_hashes: Arc::new(std::array::from_fn(|_| AtomicU32::new(0))),
     });
 
     // Initialize O(1) Deduplication Cache
