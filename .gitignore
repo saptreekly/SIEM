@@ -1,0 +1,10 @@
+/target/
+/storage/
+/tools/forwarder
+/tools/analytics
+*.tar.xz
+perf.data
+port.info
+siem.log
+siem.pid
+.env
