@@ -6,7 +6,7 @@ mod storage;
 
 use std::env;
 use std::sync::{Arc, Mutex};
-use tokio::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicU64;
 use log::info;
 use env_logger;
 
