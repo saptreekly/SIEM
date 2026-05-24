@@ -25,6 +25,7 @@ tracing-opentelemetry = "0.25"
 opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic"] }
 log = "0.4"
 env_logger = "0.9"
+libc = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

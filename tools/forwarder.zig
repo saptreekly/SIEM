@@ -22,6 +22,10 @@ extern "c" fn munmap(addr: *anyopaque, len: usize) c_int;
 extern "c" fn close(fd: c_int) c_int;
 extern "c" fn usleep(useconds: c_uint) c_int;
 extern "c" fn time(t: *i64) i64;
+extern "c" fn sem_open(name: [*:0]const u8, oflag: c_int, mode: c_uint, value: c_uint) ?*anyopaque;
+extern "c" fn sem_wait(sem: ?*anyopaque) c_int;
+extern "c" fn sem_post(sem: ?*anyopaque) c_int;
+extern "c" fn sem_close(sem: ?*anyopaque) c_int;
 
 const O_RDWR = 0x0002;
 const O_CREAT = 0x0200;
@@ -40,15 +44,21 @@ pub fn main() !void {
     const mmap_slice: [*]u8 = @ptrCast(mmap_ptr);
     var data_buffer = mmap_slice[DATA_OFFSET..SHM_SIZE];
 
-    // Initialize volatile head and tail pointers
-    @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = 0;
-    @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).* = 0;
+    const sem = sem_open("/siem_shm_sem", O_CREAT, 0o666, 1);
+    if (sem == null or sem == @as(?*anyopaque, @ptrFromInt(0xFFFFFFFFFFFFFFFF))) return error.SemOpenFailed;
+    defer _ = sem_close(sem);
+
+    // Remove the blind reset of head/tail pointers
+    // @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = 0;
+    // @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).* = 0;
 
     var head: u32 = 0;
     var tail: u32 = 0;
 
     while (true) {
+        _ = sem_wait(sem);
         tail = @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + TAIL_OFFSET))).*;
+        head = @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).*;
         
         // Construct mock event
         var t: i64 = 0;
@@ -94,7 +104,10 @@ pub fn main() !void {
             
             head += @as(u32, @intCast(event_size));
             @as(*volatile u32, @alignCast(@ptrCast(mmap_slice + HEAD_OFFSET))).* = head;
-        } else {
+        }
+        _ = sem_post(sem);
+        
+        if (available_space <= event_size) {
             _ = usleep(10000); // 10ms
         }
     }

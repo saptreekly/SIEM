@@ -1,11 +1,14 @@
 use memmap2::MmapMut;
 use std::fs::{OpenOptions};
+use std::ffi::CString;
+use libc::{sem_t, sem_open, sem_wait, sem_post, sem_close, O_CREAT};
 use siem::LogEvent;
 
 pub const SHM_PATH: &str = "/tmp/siem_shm.bin";
 pub const SHM_SIZE: usize = 1024 * 1024; // 1MB
 pub const HEADER_SIZE: usize = 8; // 4 byte head, 4 byte tail
 pub const DATA_SIZE: usize = SHM_SIZE - HEADER_SIZE;
+pub const SEM_NAME: &str = "/siem_shm_sem";
 
 #[repr(C)]
 pub struct ShmFrame {
@@ -18,6 +21,7 @@ pub struct ShmFrame {
 
 pub struct ShmRingBuffer {
     mmap: MmapMut,
+    sem: *mut sem_t,
 }
 
 impl ShmRingBuffer {
@@ -33,7 +37,13 @@ impl ShmRingBuffer {
         
         let mmap = unsafe { MmapMut::map_mut(&file).expect("Failed to mmap") };
         
-        ShmRingBuffer { mmap }
+        let sem_name = CString::new(SEM_NAME).unwrap();
+        let sem = unsafe { sem_open(sem_name.as_ptr(), O_CREAT, 0o666, 1) };
+        if sem == libc::SEM_FAILED {
+            panic!("Failed to open semaphore");
+        }
+        
+        ShmRingBuffer { mmap, sem }
     }
 
     pub fn write_event(&mut self, event: &LogEvent) {
@@ -63,6 +73,8 @@ impl ShmRingBuffer {
         let frame_slice = unsafe { std::slice::from_raw_parts(frame_ptr, len) };
 
         unsafe {
+            sem_wait(self.sem);
+
             let ptr = self.mmap.as_mut_ptr();
             
             // Read current head
@@ -72,19 +84,25 @@ impl ShmRingBuffer {
             // Write data
             let write_pos = head as usize;
             
-            // Note: Simplification - assume struct size fits in contiguous block.
             let dst_ptr = ptr.add(HEADER_SIZE + write_pos);
             std::ptr::copy_nonoverlapping(frame_slice.as_ptr(), dst_ptr, len);
             
             // Update head
             let new_head = (head + len as u32) % DATA_SIZE as u32;
             std::ptr::write_volatile(head_ptr, new_head);
+
+            sem_post(self.sem);
         }
     }
 }
 
 impl Drop for ShmRingBuffer {
     fn drop(&mut self) {
-        // MmapMut is automatically unmapped when dropped.
+        unsafe {
+            sem_close(self.sem);
+        }
     }
 }
+
+unsafe impl Send for ShmRingBuffer {}
+unsafe impl Sync for ShmRingBuffer {}

@@ -33,6 +33,14 @@ foreign libc {
     my_mmap   :: proc(addr: rawptr, len: int, prot: i32, flags: i32, fd: i32, offset: i64) -> rawptr ---
     @(link_name="munmap")
     my_munmap :: proc(addr: rawptr, len: int) -> i32 ---
+    @(link_name="sem_open")
+    sem_open  :: proc(name: cstring, oflag: i32, mode: i32, value: i32) -> rawptr ---
+    @(link_name="sem_wait")
+    sem_wait  :: proc(sem: rawptr) -> i32 ---
+    @(link_name="sem_post")
+    sem_post  :: proc(sem: rawptr) -> i32 ---
+    @(link_name="sem_close")
+    sem_close :: proc(sem: rawptr) -> i32 ---
 }
 
 main :: proc() {
@@ -55,6 +63,15 @@ main :: proc() {
     }
     defer my_munmap(addr, SHM_SIZE)
 
+    // Open semaphore
+    // O_CREAT = 0x0200
+    sem := sem_open("/siem_shm_sem", 0x0200, 0o666, 1)
+    if sem == MAP_FAILED {
+        fmt.eprintln("Error: Failed to open semaphore.")
+        return
+    }
+    defer sem_close(sem)
+
     // 3. Cast raw pointer allocation to a safe byte index array slice
     data := ([^]u8)(addr)[:SHM_SIZE]
 
@@ -65,44 +82,30 @@ main :: proc() {
     
     event_count := 0
     for event_count < 500 {
+        sem_wait(sem)
         head_ptr := cast(^u32)&data[HEAD_OFFSET]
         tail_ptr := cast(^u32)&data[TAIL_OFFSET]
         
         head := head_ptr^
         tail := tail_ptr^
-
-        // Validate head and tail
-        if head >= DATA_SIZE || tail >= DATA_SIZE {
-             fmt.eprintf("WARNING: Invalid head/tail values\n")
-             head_ptr^ = 0
-             tail_ptr^ = 0
-             head = 0
-             tail = 0
-        }
-
+        
         if head == tail {
+            sem_post(sem)
             time.sleep(10 * time.Millisecond)
             continue
-        }
-
-        // DEBUG: Check tail bounds (keep for now to be sure)
-        if DATA_OFFSET + int(tail) + size_of(LogEvent) > SHM_SIZE {
-             fmt.eprintf("CRITICAL: Tail out of bounds! tail: %d\n", tail)
-             // Instead of breaking, let's reset tail to 0 to recover
-             tail_ptr^ = 0
-             continue
         }
 
         // Overlay our LogEvent structure blueprint exactly where the tail offset indicates
         event_ptr := cast(^LogEvent)&data[DATA_OFFSET + int(tail)]
         append(&hot_window, event_ptr^)
-
-        event_count += 1
-        
-        fmt.printf("Processed Event %d: TS=%d\n", event_count, event_ptr.timestamp)
         
         // Step forward in memory cleanly by the uniform size of our data struct
         tail = (tail + u32(size_of(LogEvent))) % u32(DATA_SIZE)
         tail_ptr^ = tail
+        sem_post(sem)
+
+        event_count += 1
+        
+        fmt.printf("Processed Event %d: TS=%d\n", event_count, event_ptr.timestamp)
     }
 }

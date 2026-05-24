@@ -1414,6 +1414,7 @@ dependencies = [
  "dotenvy",
  "env_logger",
  "flate2",
+ "libc",
  "log",
  "memmap2",
  "nom",
