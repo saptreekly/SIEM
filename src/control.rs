@@ -50,8 +50,10 @@ async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU
                     }
                     Some("INGESTION_ENDPOINT") => {
                         if let Some(endpoint) = command.split_whitespace().nth(1) {
-                            let mut endpoint_lock = ingestion_endpoint.lock().unwrap();
-                            *endpoint_lock = endpoint.to_string();
+                            {
+                                let mut endpoint_lock = ingestion_endpoint.lock().unwrap();
+                                *endpoint_lock = endpoint.to_string();
+                            }
                             stream.write_all(b"Ingestion endpoint updated\n").await.unwrap();
                         } else {
                             stream.write_all(b"Missing ingestion endpoint\n").await.unwrap();
