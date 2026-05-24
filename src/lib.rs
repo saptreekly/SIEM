@@ -9,6 +9,7 @@ extern "C" {
     fn parse_timestamp_asm(data: *const u8) -> i64;
 }
 
+
 // Define a structured representation of the log
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct LogEvent {
@@ -22,7 +23,7 @@ pub struct LogEvent {
 // Zero-copy parser
 pub fn parse_log(raw: &str) -> Option<LogEvent> {
     let ts = unsafe { parse_timestamp_asm(raw.as_ptr()) };
-    
+
     // In a production scenario, we'd do smarter parsing, but for 
     // now we just ensure message doesn't allocate beyond the CompactString limit.
     Some(LogEvent { 

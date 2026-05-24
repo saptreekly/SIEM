@@ -6,7 +6,7 @@ mod storage;
 
 use std::collections::HashSet;
 use std::env;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::net::TcpListener;
