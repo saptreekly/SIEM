@@ -9,14 +9,6 @@ pub struct GossipMesh {
 }
 
 impl GossipMesh {
-    pub fn new(_size: usize) -> Self {
-        Self {
-            recent_hashes: Arc::new(std::array::from_fn(|_| AtomicU32::new(0))),
-        }
-    }
-}
-
-impl GossipMesh {
     pub fn new(_capacity: usize) -> Self {
         let mut hashes = Vec::with_capacity(2048);
         for _ in 0..2048 {

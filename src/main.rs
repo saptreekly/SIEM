@@ -7,7 +7,8 @@ mod storage;
 use std::collections::HashSet;
 use std::env;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc as tokio_mpsc;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::signal;
@@ -60,15 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     info!("SIEM Performer started.");
 
-    let (terminate_tx, terminate_signal) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut sigterm = SignalKind::terminate().unwrap();
-        let mut stream = sigterm.stream().unwrap();
-        tokio::runtime::Handle::current().block_on(async {
-            while stream.recv().await.is_some() {
-                let _ = terminate_tx.send(());
-            }
-        });
+    let (terminate_tx, mut terminate_signal) = tokio_mpsc::channel(1);
+    tokio::spawn(async move {
+        let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
+        sigterm.recv().await;
+        let _ = terminate_tx.send(()).await;
     });
 
     tokio::select! {
@@ -155,4 +152,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         } => {}
     }
+    Ok(())
+}
 
