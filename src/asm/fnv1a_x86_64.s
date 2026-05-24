@@ -1,4 +1,6 @@
+.global fnv1a_hash_asm
 .global _fnv1a_hash_asm
+fnv1a_hash_asm:
 _fnv1a_hash_asm:
     # rdi = pointer to data
     # rsi = length

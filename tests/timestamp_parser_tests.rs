@@ -1,24 +1,34 @@
 use siem::parse_log;
 
 #[test]
-fn test_parse_iso8601_timestamp() {
-    let timestamp_str = "2026-05-24T12:00:00Z";
-    // We construct a dummy log entry that just contains this timestamp,
-    // assuming the parser expects it at the start or in a specific format.
-    // Based on src/asm/parse_timestamp_x86_64.s, it expects the string starting at the pointer.
-    let log_entry = format!("{} some message", timestamp_str);
-    
-    let event = parse_log(&log_entry).expect("Failed to parse log");
-    
-    // 2026-05-24T12:00:00Z
-    // The parser logic implemented:
-    // Days = (Year - 1970) * 365 + (Year - 1969) / 4
-    // Seconds = Days * 86400 + Hour * 3600 + Min * 60 + Sec
-    
-    // Year: 2026
-    // Days: (2026 - 1970) * 365 + (2026 - 1969) / 4 = 56 * 365 + 57 / 4 = 20440 + 14 = 20454
-    // Seconds = 20454 * 86400 + 12 * 3600 + 0 * 60 + 0 = 1767225600 + 43200 = 1767268800
-    
-    assert!(event.timestamp > 0);
-    println!("Parsed timestamp: {}", event.timestamp);
+fn test_parse_iso8601_timestamp_real_epoch() {
+    // Case 1: The original date mentioned in the user request (2026-05-24)
+    let ts_str = "2026-05-24T12:00:00Z";
+    let log = format!("{} some message", ts_str);
+    let event = parse_log(&log).expect("Failed to parse log");
+    // Unix Epoch for 2026-05-24T12:00:00Z is 1779624000
+    assert_eq!(event.timestamp, 1779624000, "Failed for 2026-05-24T12:00:00Z");
+
+    // Case 2: Before leap day in a leap year
+    let ts_str_2 = "2024-02-28T00:00:00Z";
+    let event_2 = parse_log(&ts_str_2).expect("Failed to parse log");
+    assert_eq!(event_2.timestamp, 1709078400, "Failed for 2024-02-28T00:00:00Z");
+
+    // Case 3: On leap day
+    let ts_str_3 = "2024-02-29T00:00:00Z";
+    let event_3 = parse_log(&ts_str_3).expect("Failed to parse log");
+    assert_eq!(event_3.timestamp, 1709164800, "Failed for 2024-02-29T00:00:00Z");
+
+    // Case 4: After leap day in a leap year
+    let ts_str_4 = "2024-03-01T00:00:00Z";
+    let event_4 = parse_log(&ts_str_4).expect("Failed to parse log");
+    assert_eq!(event_4.timestamp, 1709251200, "Failed for 2024-03-01T00:00:00Z");
+}
+
+#[test]
+fn test_parse_iso8601_timestamp_boundary() {
+    // 1970-01-02T00:00:00Z
+    let ts_str = "1970-01-02T00:00:00Z";
+    let event = parse_log(&ts_str).expect("Failed to parse log");
+    assert_eq!(event.timestamp, 86400, "Failed for 1970-01-02T00:00:00Z");
 }
