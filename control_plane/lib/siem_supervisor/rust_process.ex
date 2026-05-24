@@ -3,144 +3,111 @@ defmodule SiemSupervisor.RustProcess do
   require Logger
 
   @check_interval 5000 # 5 seconds
+  @default_control_port 8081
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+  # We'll use this module to track the state of a remote Rust performer.
+  # It will no longer spawn a local process.
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
   @impl true
-  def init(:ok) do
+  def init(opts) do
     Process.flag(:trap_exit, true)
-    executable = Path.join(File.cwd!(), "target/release/siem")
-    # Start the port and get the port reference
-    port_ref = start_port(executable)
+    ip_address = Keyword.fetch!(opts, :ip_address)
+    control_port = Keyword.get(opts, :control_port, @default_control_port)
+    node_id = Keyword.fetch!(opts, :name)
 
-    # Get the OS PID from the port reference
-    # :erlang.port_info/2 returns {:os_pid, pid} or {:error, reason}
-    os_pid_info = :erlang.port_info(port_ref, :os_pid)
+    Logger.info("Initializing remote Rust Performer tracker for #{node_id} at #{ip_address}:#{control_port}")
 
-    case os_pid_info do
-      {:os_pid, os_pid} ->
-        # Calculate the dynamic socket path
-        socket_path = "/tmp/siem_control_performer_#{os_pid}.sock"
-        Logger.info("Rust SIEM started with OS PID: #{os_pid}, UDS: #{socket_path}")
-        # Schedule periodic health check with the socket path
-        Process.send_after(self(), {:check_health, socket_path}, @check_interval)
-        {:ok, %{port: port_ref, executable: executable, os_pid: os_pid, socket_path: socket_path}}
-      {:error, reason} ->
-        Logger.error("Failed to get OS PID for Rust SIEM: #{inspect(reason)}. Shutting down.")
-        # Consider a more graceful shutdown or restart strategy here
-        {:stop, {:init_error, reason}}
-    end
-  end
+    # Schedule periodic health check
+    Process.send_after(self(), :check_health, @check_interval)
 
-  defp start_port(executable) do
-    Logger.info("Spawning Rust SIEM executable: #{executable}")
-    # Port.open returns a port reference
-    Port.open({:spawn, executable}, [:binary, :exit_status, :stderr_to_stdout])
+    {:ok, %{ip_address: ip_address, control_port: control_port, node_id: node_id, status: :unknown}}
   end
 
   @impl true
-  def handle_info({_port, {:data, data}}, state) do
-    Logger.debug("Rust SIEM output: #{data}")
+  def handle_info(:check_health, state) do
+    # Check health of the remote control socket
+    case SiemSupervisor.ControlClient.check_performer_health(state.ip_address, state.control_port) do
+      :ok ->
+        Logger.debug("Remote Rust Performer #{state.node_id} at #{state.ip_address}:#{state.control_port} is healthy.")
+        {:noreply, %{state | status: :healthy}}
+      {:error, reason} ->
+        Logger.warning("Remote Rust Performer #{state.node_id} at #{state.ip_address}:#{state.control_port} is NOT reachable: #{inspect(reason)}")
+        {:noreply, %{state | status: :unreachable}}
+    end
+
+    Process.send_after(self(), :check_health, @check_interval)
     {:noreply, state}
   end
 
-  @impl true
-  def handle_info({_port, {:exit_status, status}}, state) do
-    Logger.error("Rust SIEM exited with status #{status}. Restarting...")
-    # Restart the process by re-initializing
-    # This will re-run init logic to get new port and PID
-    {:noreply, init(:ok)}
-  end
-
-  @impl true
-  def handle_info({:check_health, socket_path}, state) do
-    # First, check if the Rust process port itself is alive
-    if Process.alive?(state.port) do
-      Logger.debug("Rust SIEM process port is alive.")
-      # Then, check the health of the control socket
-      case check_socket_health(socket_path) do
-        :ok -> Logger.debug("Rust SIEM control socket is reachable.")
-        {:error, _reason} -> Logger.warning("Rust SIEM control socket is NOT reachable.")
-      end
-    else
-      Logger.error("Rust SIEM process port is dead. Attempting to restart.")
-      # If port is dead, try to re-initialize the process
-      # This will restart the port and update state
-      {:noreply, init(:ok)}
-    end
-    # Reschedule the health check, passing the current socket_path from state
-    Process.send_after(self(), {:check_health, state.socket_path}, @check_interval)
-    {:noreply, state}
-  end
-
-  defp check_socket_health(socket_path) do
-    # Attempt to connect to the UDS. If it succeeds, the control socket is likely up.
-    # We don't need to send a command, just check connectivity.
-    case :gen_tcp.connect({:local, ~c"#{socket_path}"}, 0, [:binary, packet: 0]) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket) # Close immediately as we only checked connectivity
-        :ok
-      {:error, reason} ->
-        # Log the error but don't necessarily crash. The process might be restarting or not ready.
-        Logger.warning("Health check failed for socket #{socket_path}: #{inspect(reason)}")
-        {:error, reason}
-    end
+  # No longer handling exit_status or data from a local port.
+  # These would be handled by a network connection monitoring system if needed.
+  def handle_info({:EXIT, _pid, reason}, state) do
+    Logger.error("GenServer for #{state.node_id} exited: #{inspect(reason)}")
+    {:noreply, %{state | status: :exited}}
   end
 end
 
-
 defmodule SiemSupervisor.ControlClient do
+  require Logger
+  @default_control_port 8081
 
   @doc """
-  Sends a command to a performer node's control socket.
+  Sends a command to a remote performer node's TCP control socket.
 
-  The `identifier` is expected to be the OS Process ID (PID) of the performer.
+  The `ip_address` and `control_port` identify the target performer.
   """
-  def send_command(os_pid, command) do
-    # Construct the dynamic socket path using the OS PID
-    socket_path = "/tmp/siem_control_performer_#{os_pid}.sock"
-    Logger.debug("Attempting to send command to PID #{os_pid} via socket #{socket_path}")
+  def send_command(ip_address, control_port \ @default_control_port, command) do
+    Logger.debug("Attempting to send command to #{ip_address}:#{control_port} via TCP.")
 
-    case :gen_tcp.connect({:local, ~c"#{socket_path}"}, 0, [:binary, packet: 0]) do
+    case :gen_tcp.connect(to_charlist(ip_address), control_port, [:binary, packet: 0]) do
       {:ok, socket} ->
-        # Ensure command ends with newline, as per original logic.
         :gen_tcp.send(socket, command <> "
 ")
-        # In a real-world scenario, you might want to read the response here.
-        # For now, we just send and close.
         :gen_tcp.close(socket)
-        {:ok, socket} # Return socket for potential further interaction, or just :ok
+        :ok
       {:error, reason} ->
-        Logger.warning("Failed to connect to control socket #{socket_path} for PID #{os_pid}: #{inspect(reason)}")
+        Logger.warning("Failed to connect to control socket #{ip_address}:#{control_port}: #{inspect(reason)}")
         {:error, reason}
     end
   end
 
   @doc """
-  Updates the threshold for a specific performer node identified by its OS PID.
+  Checks the health of a remote performer node by attempting a TCP connection.
   """
-  def update_threshold(os_pid, new_threshold) do
-    send_command(os_pid, "SET_THRESHOLD #{new_threshold}")
+  def check_performer_health(ip_address, control_port \ @default_control_port) do
+    case :gen_tcp.connect(to_charlist(ip_address), control_port, [:binary, packet: 0, active: false, exit_on_close: false, send_timeout: 1000]) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        :ok
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Updates the threshold for a specific remote performer node.
+  """
+  def update_threshold(ip_address, control_port \\ @default_control_port, new_threshold) do
+    send_command(ip_address, control_port, "SET_THRESHOLD #{new_threshold}")
   end
 
   @doc """
   Broadcasts a new threshold to all registered performer nodes.
-  This function assumes that :siem_nodes ETS table contains OS PIDs as keys.
-  If it contains other identifiers, this function would need adjustment
-  to map those identifiers to OS PIDs.
+  This function assumes that :siem_nodes ETS table contains maps like
+  `%{name: node_id, ip_address: ip, control_port: port}`.
   """
   def broadcast_threshold(new_threshold) do
-    # Assuming :siem_nodes ETS table stores tuples like {os_pid, node_data}
-    # :ets.lookup returns a list of {key, value} tuples.
-    nodes_data = :ets.lookup(:siem_nodes)
+    # Assuming :siem_nodes ETS table stores data like %{name: node_id, ip_address: ip, control_port: port}
+    nodes_data = :ets.tab2list(:siem_nodes)
 
-    os_pids = Enum.map(nodes_data, fn {pid, _data} -> pid end)
-
-    Logger.info("Broadcasting threshold #{new_threshold} to #{length(os_pids)} nodes.")
-    for os_pid <- os_pids do
-      update_threshold(os_pid, new_threshold)
+    Logger.info("Broadcasting threshold #{new_threshold} to #{length(nodes_data)} nodes.")
+    for {_id, node_map} <- nodes_data do
+      ip_address = Map.fetch!(node_map, :ip_address)
+      control_port = Map.get(node_map, :control_port, @default_control_port)
+      update_threshold(ip_address, control_port, new_threshold)
     end
   end
 end
