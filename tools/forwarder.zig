@@ -2,9 +2,9 @@ const std = @import("std");
 
 const SHM_SIZE: usize = 1024 * 1024; // 1MB
 
-const HEAD_OFFSET: usize = 0;
-const TAIL_OFFSET: usize = 4;
-const DATA_OFFSET: usize = 8;
+const HEAD_OFFSET: usize = 128;
+const TAIL_OFFSET: usize = 132;
+const DATA_OFFSET: usize = 192;
 const DATA_SIZE: usize = SHM_SIZE - DATA_OFFSET;
 
 const LogEvent = extern struct {

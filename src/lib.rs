@@ -1,3 +1,4 @@
+pub mod tsc;
 pub mod crypto;
 pub mod dedup;
 pub use crypto::fnv1a_hash;

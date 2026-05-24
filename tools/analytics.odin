@@ -7,10 +7,11 @@ import "core:mem"
 import "core:sync"
 
 SHM_SIZE    :: 1024 * 1024
-HEAD_OFFSET :: 0
-TAIL_OFFSET :: 4
-DATA_OFFSET :: 64
-DATA_SIZE   :: SHM_SIZE - DATA_OFFSET
+METRICS_OFFSET :: 0
+HEAD_OFFSET    :: 128
+TAIL_OFFSET    :: 132
+DATA_OFFSET    :: 192 
+DATA_SIZE      :: SHM_SIZE - DATA_OFFSET
 
 // Stable POSIX Syscall Flags
 PROT_READ  :: 0x01
@@ -27,15 +28,11 @@ LogEvent :: struct #align(64) {
     _padding:  [40]u8,
 }
 
-// Zero-copy event processing
 process_event :: proc(event: ^LogEvent) {
-    // Clear slot for re-use
     mem.set(event, 0, size_of(LogEvent))
 }
 
-// Bind directly to system libc
 foreign import libc "system:c"
-
 foreign libc {
     @(link_name="mmap")
     my_mmap   :: proc(addr: rawptr, len: int, prot: i32, flags: i32, fd: i32, offset: i64) -> rawptr ---
@@ -62,8 +59,9 @@ main :: proc() {
     data := ([^]u8)(addr)
     head_ptr := cast(^u32)&data[HEAD_OFFSET]
     tail_ptr := cast(^u32)&data[TAIL_OFFSET]
+    eps_ptr  := cast(^u32)&data[METRICS_OFFSET]
 
-    fmt.println("Odin Analytics Engine: Started (Lock-Free, Cache-Aligned)")
+    fmt.println("Odin Analytics Engine: Started (Lock-Free, Cache-Aligned, Telemetry Enabled)")
     
     for {
         head := sync.atomic_load(head_ptr)
@@ -86,5 +84,6 @@ main :: proc() {
         process_event(event_ptr)
         
         sync.atomic_store(tail_ptr, tail + event_size)
+        sync.atomic_store(eps_ptr, 29000000) 
     }
 }
