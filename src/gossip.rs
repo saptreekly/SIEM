@@ -1,7 +1,7 @@
-use tokio::net::UdpSocket;
-use std::time::Duration;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::UdpSocket;
 use tracing::info;
 
 pub struct GossipMesh {
@@ -21,12 +21,16 @@ impl GossipMesh {
 }
 
 pub async fn start_gossip(node_name: String, port: u16, mesh: Arc<GossipMesh>) {
-    let socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).await.expect("Failed to bind UDP");
-    socket.set_broadcast(true).expect("Failed to enable broadcast");
-    
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))
+        .await
+        .expect("Failed to bind UDP");
+    socket
+        .set_broadcast(true)
+        .expect("Failed to enable broadcast");
+
     let broadcast_addr = format!("255.255.255.255:{}", port);
     let message = format!("PERFORMER_ALIVE:{}", node_name);
-    
+
     let socket_send = Arc::new(socket);
     let socket_recv = Arc::clone(&socket_send);
     let mesh_send = Arc::clone(&mesh);
@@ -46,7 +50,9 @@ pub async fn start_gossip(node_name: String, port: u16, mesh: Arc<GossipMesh>) {
             let _ = socket_send.send_to(&data, &broadcast_addr).await;
 
             // Broadcast heartbeat
-            let _ = socket_send.send_to(message.as_bytes(), &broadcast_addr).await;
+            let _ = socket_send
+                .send_to(message.as_bytes(), &broadcast_addr)
+                .await;
 
             tokio::time::sleep(Duration::from_secs(5)).await;
         }

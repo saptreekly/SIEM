@@ -17,7 +17,7 @@ impl AtomicBitArray {
     pub fn check_and_set(&self, hash: u64) -> bool {
         let bucket = (hash & 0x7FF) as usize; // 2048 buckets
         let bit = 1 << (hash & 0xF); // 16 bits per bucket
-        
+
         let prev = self.buckets[bucket].fetch_or(bit, Ordering::Relaxed);
         (prev & bit) != 0
     }

@@ -1414,6 +1414,7 @@ dependencies = [
  "dotenvy",
  "env_logger",
  "flate2",
+ "lazy_static",
  "libc",
  "log",
  "memmap2",

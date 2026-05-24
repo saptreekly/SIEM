@@ -1,26 +1,26 @@
 mod control;
 mod crypto;
+mod dedup;
 mod gossip;
 mod shm;
 mod storage;
-mod dedup;
 
+use crate::dedup::AtomicBitArray;
+use env_logger;
+use log::info;
 use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use crate::dedup::AtomicBitArray;
-use tokio::sync::mpsc as tokio_mpsc;
-use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::signal::unix::SignalKind;
-use log::info;
-use env_logger;
+use tokio::sync::mpsc as tokio_mpsc;
 
+use crate::crypto::fnv1a_hash;
+use crate::gossip::GossipMesh;
 use crate::shm::ShmRingBuffer;
 use crate::storage::{Storage, StorageMessage};
-use crate::gossip::GossipMesh;
-use crate::crypto::fnv1a_hash;
 use siem::LogEvent;
 
 #[tokio::main]
@@ -28,15 +28,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     // 1. Runtime Infrastructure & Control Tasks
-    let control_address = env::var("CONTROL_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8081".to_string());
+    let control_address =
+        env::var("CONTROL_ADDRESS").unwrap_or_else(|_| "127.0.0.1:9090".to_string());
     let threshold = Arc::new(AtomicU64::new(100));
-    let ingestion_endpoint = Arc::new(Mutex::new("http://localhost:8080".to_string()));
+    let ingestion_endpoint = Arc::new(Mutex::new("http://localhost:9090".to_string()));
 
     tokio::spawn({
         let threshold_clone = Arc::clone(&threshold);
         let ingestion_endpoint_clone = Arc::clone(&ingestion_endpoint);
         async move {
-            control::start_control_listener(control_address, threshold_clone, ingestion_endpoint_clone).await;
+            control::start_control_listener(
+                control_address,
+                threshold_clone,
+                ingestion_endpoint_clone,
+            )
+            .await;
         }
     });
 
@@ -59,8 +65,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dedup_cache = Arc::new(AtomicBitArray::new());
 
     // Bind core data ingestion loop
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    info!("SIEM Performer started.");
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    std::fs::write("port.info", addr.port().to_string())?;
+    info!("SIEM Performer started on port {}", addr.port());
 
     let (terminate_tx, mut terminate_signal) = tokio_mpsc::channel(1);
     tokio::spawn(async move {
@@ -151,4 +159,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
-

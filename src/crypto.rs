@@ -9,9 +9,7 @@ extern "C" {
 /// Computes the 32-bit FNV-1a hash of a byte slice.
 #[inline(always)]
 pub fn fnv1a_hash(data: &[u8]) -> u32 {
-    unsafe {
-        fnv1a_hash_asm(data.as_ptr(), data.len())
-    }
+    unsafe { fnv1a_hash_asm(data.as_ptr(), data.len()) }
 }
 
 #[cfg(test)]
@@ -23,7 +21,10 @@ mod tests {
         let log = b"Failed password for root";
         let hash1 = fnv1a_hash(log);
         let hash2 = fnv1a_hash(log);
-        assert_eq!(hash1, hash2, "Hashing identical strings should produce identical results");
+        assert_eq!(
+            hash1, hash2,
+            "Hashing identical strings should produce identical results"
+        );
     }
 
     #[test]

@@ -1,13 +1,13 @@
+use crate::shm::ShmRingBuffer;
+use bincode;
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use siem::LogEvent;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Write, BufWriter};
+use std::io::{BufWriter, Write};
 use std::thread;
+use std::time::Duration;
 use tracing::info;
-use siem::LogEvent;
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use std::time::{Duration};
-use bincode;
-use crate::shm::ShmRingBuffer;
 
 pub enum StorageMessage {
     Insert(LogEvent),
@@ -38,7 +38,9 @@ struct MemTable {
 }
 
 fn database_actor_sync(rx: Receiver<StorageMessage>, mut shm: Option<ShmRingBuffer>) {
-    let mut memtable = MemTable { data: BTreeMap::new() };
+    let mut memtable = MemTable {
+        data: BTreeMap::new(),
+    };
     let wal_file = fs::OpenOptions::new()
         .append(true)
         .create(true)
@@ -52,11 +54,17 @@ fn database_actor_sync(rx: Receiver<StorageMessage>, mut shm: Option<ShmRingBuff
             Ok(StorageMessage::Insert(event)) => {
                 // Write to WAL first
                 let encoded = bincode::serialize(&event).expect("Failed to serialize");
-                wal_writer.write_all(&encoded).expect("Failed to write to WAL");
-                wal_writer.write_all(b"
-").expect("Failed to write newline to WAL");
+                wal_writer
+                    .write_all(&encoded)
+                    .expect("Failed to write to WAL");
+                wal_writer
+                    .write_all(
+                        b"
+",
+                    )
+                    .expect("Failed to write newline to WAL");
                 wal_writer.flush().expect("Failed to flush WAL");
-                
+
                 // Write to SHM
                 if let Some(ref mut shm_buf) = shm {
                     shm_buf.write_event(&event);
@@ -64,7 +72,7 @@ fn database_actor_sync(rx: Receiver<StorageMessage>, mut shm: Option<ShmRingBuff
 
                 // Update MemTable
                 memtable.data.insert(event.timestamp, event);
-                
+
                 if memtable.data.len() >= 5000 {
                     info!("MemTable full, flushing to SSTable (STUB)");
                     memtable.data.clear();

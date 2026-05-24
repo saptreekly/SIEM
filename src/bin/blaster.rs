@@ -1,9 +1,9 @@
-use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::net::TcpStream;
-use tokio::sync::{Barrier, oneshot};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::net::TcpStream;
+use tokio::sync::{oneshot, Barrier};
 
 const CONCURRENT_WORKERS: u64 = 10;
 const LOGS_PER_WORKER: u64 = 5_000;
@@ -42,9 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let counter = Arc::clone(&counter);
         let barrier = Arc::clone(&barrier);
         tokio::spawn(async move {
+            let port = std::fs::read_to_string("port.info").unwrap().trim().to_string();
+            let addr = format!("127.0.0.1:{}", port);
             let mut backoff = Duration::from_millis(100);
             let stream = loop {
-                match TcpStream::connect("127.0.0.1:8080").await {
+                match TcpStream::connect(&addr).await {
                     Ok(s) => break s,
                     Err(_) => {
                         tokio::time::sleep(backoff).await;
@@ -53,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
             let mut writer = BufWriter::new(stream);
-            
+
             barrier.wait().await; // Synchronize start
 
             for _ in 0..LOGS_PER_WORKER {
@@ -70,16 +72,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     barrier.wait().await; // Wait for all workers to start
     barrier.wait().await; // Wait for all workers to finish
     let _ = tx.send(()); // Signal telemetry task to stop
-    
+
     let elapsed = start_time.elapsed();
     let total_logs = counter.load(Ordering::Relaxed);
     let avg_eps = total_logs as f64 / elapsed.as_secs_f64();
 
-    println!("
---- Blaster Performance Report ---");
+    println!(
+        "
+--- Blaster Performance Report ---"
+    );
     println!("Total Connections Opened: {}", CONCURRENT_WORKERS);
     println!("Total Logs Sent:         {}", total_logs);
-    println!("Total Time Elapsed:      {:.2} seconds", elapsed.as_secs_f64());
+    println!(
+        "Total Time Elapsed:      {:.2} seconds",
+        elapsed.as_secs_f64()
+    );
     println!("Average Throughput:      {:.2} EPS", avg_eps);
     println!("----------------------------------");
 

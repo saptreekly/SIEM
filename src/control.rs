@@ -1,13 +1,22 @@
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicU64;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use log::info;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
-pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_endpoint: Arc<Mutex<String>>) {
-    let listener = TcpListener::bind(&control_address).await.expect("Failed to bind to TCP control address");
+pub async fn start_control_listener(
+    control_address: String,
+    threshold: Arc<AtomicU64>,
+    ingestion_endpoint: Arc<Mutex<String>>,
+) {
+    let listener = TcpListener::bind(&control_address)
+        .await
+        .expect("Failed to bind to TCP control address");
 
-    info!("Control plane hardened and listening on: {}", control_address);
+    info!(
+        "Control plane hardened and listening on: {}",
+        control_address
+    );
 
     loop {
         match listener.accept().await {
@@ -17,7 +26,8 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
                 let ingestion_endpoint_clone = Arc::clone(&ingestion_endpoint);
                 tokio::spawn(async move {
                     let stream = stream;
-                    handle_control_connection(stream, threshold_clone, ingestion_endpoint_clone).await;
+                    handle_control_connection(stream, threshold_clone, ingestion_endpoint_clone)
+                        .await;
                 });
             }
             Err(e) => {
@@ -27,7 +37,11 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
     }
 }
 
-async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU64>, ingestion_endpoint: Arc<Mutex<String>>) {
+async fn handle_control_connection(
+    mut stream: TcpStream,
+    threshold: Arc<AtomicU64>,
+    ingestion_endpoint: Arc<Mutex<String>>,
+) {
     // Handle incoming commands
     let mut buffer = [0; 1024];
     loop {
@@ -42,10 +56,16 @@ async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU
                                 threshold.store(new_threshold, std::sync::atomic::Ordering::SeqCst);
                                 stream.write_all(b"Threshold updated\n").await.unwrap();
                             } else {
-                                stream.write_all(b"Invalid threshold value\n").await.unwrap();
+                                stream
+                                    .write_all(b"Invalid threshold value\n")
+                                    .await
+                                    .unwrap();
                             }
                         } else {
-                            stream.write_all(b"Missing threshold value\n").await.unwrap();
+                            stream
+                                .write_all(b"Missing threshold value\n")
+                                .await
+                                .unwrap();
                         }
                     }
                     Some("INGESTION_ENDPOINT") => {
@@ -54,9 +74,15 @@ async fn handle_control_connection(mut stream: TcpStream, threshold: Arc<AtomicU
                                 let mut endpoint_lock = ingestion_endpoint.lock().unwrap();
                                 *endpoint_lock = endpoint.to_string();
                             }
-                            stream.write_all(b"Ingestion endpoint updated\n").await.unwrap();
+                            stream
+                                .write_all(b"Ingestion endpoint updated\n")
+                                .await
+                                .unwrap();
                         } else {
-                            stream.write_all(b"Missing ingestion endpoint\n").await.unwrap();
+                            stream
+                                .write_all(b"Missing ingestion endpoint\n")
+                                .await
+                                .unwrap();
                         }
                     }
                     _ => {
