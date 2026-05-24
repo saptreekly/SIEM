@@ -79,16 +79,21 @@ impl ShmRingBuffer {
             
             // Read current head
             let head_ptr = ptr as *mut u32;
-            let head = std::ptr::read_volatile(head_ptr);
+            let head = std::ptr::read_volatile(head_ptr) as usize;
+            
+            // Check if frame fits in remaining space
+            let write_pos = if head + len > DATA_SIZE {
+                0
+            } else {
+                head
+            };
             
             // Write data
-            let write_pos = head as usize;
-            
             let dst_ptr = ptr.add(HEADER_SIZE + write_pos);
             std::ptr::copy_nonoverlapping(frame_slice.as_ptr(), dst_ptr, len);
             
             // Update head
-            let new_head = (head + len as u32) % DATA_SIZE as u32;
+            let new_head = (write_pos + len) as u32;
             std::ptr::write_volatile(head_ptr, new_head);
 
             sem_post(self.sem);
