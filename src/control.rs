@@ -12,11 +12,12 @@ pub async fn start_control_listener(control_address: String, threshold: Arc<Atom
 
     loop {
         match listener.accept().await {
-            Ok((mut stream, addr)) => {
+            Ok((stream, addr)) => {
                 info!("Accepted control connection from: {}", addr);
                 let threshold_clone = Arc::clone(&threshold);
                 tokio::spawn(async move {
-                    handle_control_connection(mut stream, threshold_clone, ingestion_endpoint.clone()).await;
+                    let mut stream = stream;
+                    handle_control_connection(stream, threshold_clone, ingestion_endpoint.clone()).await;
                 });
             }
             Err(e) => {
