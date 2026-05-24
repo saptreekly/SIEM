@@ -1,17 +1,16 @@
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use tokio::sync::atomic::AtomicU64;
-use tokio::net::TcpStream;
+use std::sync::atomic::AtomicU64;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use log::info;
 
 pub async fn start_control_listener(control_address: String, threshold: Arc<AtomicU64>, ingestion_endpoint: Arc<Mutex<String>>) {
-    let listener = TcpListener::bind(&control_address).expect("Failed to bind to TCP control address");
+    let listener = TcpListener::bind(&control_address).await.expect("Failed to bind to TCP control address");
 
     info!("Control plane hardened and listening on: {}", control_address);
 
     loop {
-        match listener.accept() {
+        match listener.accept().await {
             Ok((stream, addr)) => {
                 info!("Accepted control connection from: {}", addr);
                 let threshold_clone = Arc::clone(&threshold);
